@@ -242,6 +242,14 @@ function shrinkImage(file, size = MY_IMG_SIZE) {
   });
 }
 
+// おえかきで つかえる いろ
+const DRAW_COLORS = [
+  "#2B2B2B", "#D9424A", "#F0902B", "#F2CE3C", "#2FA05A",
+  "#4A7FD9", "#9B6BD9", "#E87FA8", "#8B5E3C", "#FBF8F0",
+];
+const DRAW_SIZES = [4, 9, 18, 30];
+const DRAW_CANVAS = 520; // ないぶの かいぞうど
+
 // ---------- ガチャ ----------
 const GACHA_COST = 30;
 const GACHA_COST_10 = 250;
@@ -1601,6 +1609,22 @@ const ENEMY_ART = {
 
 // てきを えがく
 function EnemyFace({ enemy, size }) {
+  if (enemy && enemy.myImage) {
+    return (
+      <img
+        src={enemy.myImage}
+        alt={enemy.name}
+        style={{
+          width: size,
+          height: size,
+          objectFit: "cover",
+          borderRadius: 14,
+          border: "2px solid #FFD23F",
+          background: "#F5F3FF",
+        }}
+      />
+    );
+  }
   const Art = enemy && ENEMY_ART[enemy.art];
   if (Art) return <Art size={size} />;
   return <span style={{ fontSize: size }}>{enemy?.emoji}</span>;
@@ -1608,7 +1632,25 @@ function EnemyFace({ enemy, size }) {
 
 // 子どもの絵があればそれを、なければ絵文字を表示するモンスター表示コンポーネント
 // artStyle: 'deformed'(SVG) / 'photo'(手描きの写真)
-function MonsterFace({ stage, size, style, artStyle = "deformed" }) {
+function MonsterFace({ stage, size, style, artStyle = "deformed", skin = null }) {
+  // じさくキャラを すがたに している ばあいは そちらを ゆうせん
+  if (skin && skin.image) {
+    return (
+      <img
+        src={skin.image}
+        alt={skin.name}
+        style={{
+          width: size,
+          height: size,
+          objectFit: "cover",
+          borderRadius: "50%",
+          border: "2px solid #FFD23F",
+          background: "#F5F3FF",
+          ...style,
+        }}
+      />
+    );
+  }
   const StageArt = stage?.Art || (stage?.id && STAGE_ART[stage.id]);
   if (artStyle === "deformed" && StageArt) {
     const Art = StageArt;
@@ -1684,6 +1726,16 @@ function MathMonsterBattle() {
   const [myMonsters, setMyMonsters] = useState([]); // {id,name,image}
   const [draftImage, setDraftImage] = useState(null);
   const [draftName, setDraftName] = useState("");
+  const [draftRole, setDraftRole] = useState("ally"); // 'ally' | 'enemy'
+  const [skinId, setSkinId] = useState(null); // なかまの すがたに つかう じさくキャラ
+  // おえかき
+  const [drawOpen, setDrawOpen] = useState(false);
+  const [drawColor, setDrawColor] = useState("#2B2B2B");
+  const [drawSize, setDrawSize] = useState(9);
+  const [eraser, setEraser] = useState(false);
+  const canvasRef = useRef(null);
+  const drawingRef = useRef(false);
+  const strokesRef = useRef([]); // もとにもどす よう
   const [imgBusy, setImgBusy] = useState(false);
   // ガチャ
   const [gachaOwned, setGachaOwned] = useState([]);
@@ -1734,6 +1786,11 @@ function MathMonsterBattle() {
     atk: statsBase.atk + rebirth,
     pointMult: statsBase.pointMult * (1 + rebirth * 0.1),
   };
+
+  // じさくキャラ(currentEnemy より まえに ていぎする ひつようが ある)
+  const myAllies = myMonsters.filter((m) => m.role !== "enemy");
+  const myEnemies = myMonsters.filter((m) => m.role === "enemy");
+  const skinMonster = myMonsters.find((m) => m.id === skinId) || null;
   // みちの とくちょうで かんがえる じかんが かわる
   const timeFor = (base, b = branch) => {
     const branchMult = (BRANCH_BONUS[b] && BRANCH_BONUS[b].timeMult) || 1;
@@ -1787,6 +1844,7 @@ function MathMonsterBattle() {
           if (data.bestFloor) setBestFloor(data.bestFloor);
           if (data.records) setRecords((r) => ({ ...r, ...data.records }));
           if (data.myMonsters) setMyMonsters(data.myMonsters);
+          if (data.skinId) setSkinId(data.skinId);
           if (data.gachaOwned) setGachaOwned(data.gachaOwned);
           if (typeof data.shards === "number") setShards(data.shards);
           if (typeof data.gachaCount === "number") setGachaCount(data.gachaCount);
@@ -1854,6 +1912,7 @@ function MathMonsterBattle() {
             bestFloor,
             records,
             myMonsters,
+            skinId,
             gachaOwned,
             shards,
             gachaCount,
@@ -1889,6 +1948,7 @@ function MathMonsterBattle() {
     bestFloor,
     records,
     myMonsters,
+    skinId,
     gachaOwned,
     shards,
     gachaCount,
@@ -1922,6 +1982,7 @@ function MathMonsterBattle() {
     setTowerFloor(1);
     setTowerResult(null);
     setMyMonsters([]);
+    setSkinId(null);
     setGachaOwned([]);
     setShards(0);
     setGachaCount(0);
@@ -2030,7 +2091,17 @@ function MathMonsterBattle() {
 
   // いま たたかっている てきを かえす(タワーと つうじょうを ここで きりわけ)
   function currentEnemy() {
-    return towerMode ? towerEnemy(towerFloor) : enemyForStage(stageNumber);
+    const base = towerMode ? towerEnemy(towerFloor) : enemyForStage(stageNumber);
+    // じさくの てきが いれば、ボスいがいの ステージで じゅんばんに とうじょう
+    if (!towerMode && !base.isBoss && myEnemies.length > 0) {
+      const normalNo = stageNumber - Math.floor(stageNumber / BOSS_INTERVAL);
+      // 3ステージに 1かいくらい じさくキャラの ばん
+      if (normalNo % 3 === 0) {
+        const mine = myEnemies[Math.floor(normalNo / 3 - 1) % myEnemies.length];
+        return { ...base, name: mine.name, myImage: mine.image, color: "#FFD23F" };
+      }
+    }
+    return base;
   }
 
   function applyEnemyAttack() {
@@ -2239,6 +2310,53 @@ function MathMonsterBattle() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stageIndex]);
 
+  // おえかき中は ページが うごかないように する
+  useEffect(() => {
+    if (!drawOpen) return;
+
+    const cv = canvasRef.current;
+    // React の onTouch は スクロールを とめられないため、
+    // ブラウザに ちょくせつ「うごかすな」と つたえる
+    const onStart = (e) => strokeStart(e);
+    const onMove = (e) => {
+      e.preventDefault();
+      strokeMove(e);
+    };
+    const onEnd = () => strokeEnd();
+    if (cv) {
+      cv.addEventListener("touchstart", onStart, { passive: false });
+      cv.addEventListener("touchmove", onMove, { passive: false });
+      cv.addEventListener("touchend", onEnd);
+      cv.addEventListener("touchcancel", onEnd);
+    }
+
+    // ゆびが キャンバスの そとに でても ページを うごかさない
+    const blockScroll = (e) => {
+      if (drawingRef.current) e.preventDefault();
+    };
+    document.addEventListener("touchmove", blockScroll, { passive: false });
+
+    // はいけいの スクロールを とめる
+    const body = document.body;
+    const prevOverflow = body.style.overflow;
+    const prevOverscroll = body.style.overscrollBehavior;
+    body.style.overflow = "hidden";
+    body.style.overscrollBehavior = "none";
+
+    return () => {
+      if (cv) {
+        cv.removeEventListener("touchstart", onStart);
+        cv.removeEventListener("touchmove", onMove);
+        cv.removeEventListener("touchend", onEnd);
+        cv.removeEventListener("touchcancel", onEnd);
+      }
+      document.removeEventListener("touchmove", blockScroll);
+      body.style.overflow = prevOverflow;
+      body.style.overscrollBehavior = prevOverscroll;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawOpen, drawColor, drawSize, eraser]);
+
   // アイテムの おしらせを じどうで けす
   useEffect(() => {
     if (!itemToast) return;
@@ -2393,15 +2511,137 @@ function MathMonsterBattle() {
     const name = (draftName || "").trim() || `オリジナル${myMonsters.length + 1}`;
     setMyMonsters((list) => [
       ...list,
-      { id: `my-${Date.now()}`, name: name.slice(0, 10), image: draftImage },
+      { id: `my-${Date.now()}`, name: name.slice(0, 10), image: draftImage, role: draftRole },
     ]);
     setDraftImage(null);
     setDraftName("");
-    setItemToast("🎨 ずかんに とうろくした!");
+    setItemToast(
+      draftRole === "ally" ? "🎨 なかまに くわわった!" : "👾 てきとして とうろくした!"
+    );
   }
 
   function deleteMyMonster(id) {
     setMyMonsters((list) => list.filter((m) => m.id !== id));
+    if (skinId === id) setSkinId(null);
+  }
+
+  // なかまの すがたを きりかえる
+  function toggleSkin(id) {
+    setSkinId((cur) => (cur === id ? null : id));
+  }
+
+
+  // ---------- おえかき ----------
+  function openDraw() {
+    setDrawOpen(true);
+    strokesRef.current = [];
+    // キャンバスは ひょうじ後に よういする
+    setTimeout(() => {
+      const cv = canvasRef.current;
+      if (!cv) return;
+      cv.width = DRAW_CANVAS;
+      cv.height = DRAW_CANVAS;
+      const ctx = cv.getContext("2d");
+      ctx.fillStyle = "#FBF8F0";
+      ctx.fillRect(0, 0, DRAW_CANVAS, DRAW_CANVAS);
+      saveStroke();
+    }, 30);
+  }
+
+  // もとにもどす ための スナップショット
+  function saveStroke() {
+    const cv = canvasRef.current;
+    if (!cv) return;
+    try {
+      strokesRef.current.push(cv.toDataURL("image/png"));
+      if (strokesRef.current.length > 12) strokesRef.current.shift();
+    } catch (e) {
+      // ほぞんできなくても おえかきは つづけられる
+    }
+  }
+
+  function undoStroke() {
+    const cv = canvasRef.current;
+    if (!cv || strokesRef.current.length < 2) return;
+    strokesRef.current.pop();
+    const prev = strokesRef.current[strokesRef.current.length - 1];
+    const ctx = cv.getContext("2d");
+    const img = new Image();
+    img.onload = () => {
+      ctx.clearRect(0, 0, DRAW_CANVAS, DRAW_CANVAS);
+      ctx.drawImage(img, 0, 0);
+    };
+    img.src = prev;
+  }
+
+  function clearCanvas() {
+    const cv = canvasRef.current;
+    if (!cv) return;
+    const ctx = cv.getContext("2d");
+    ctx.fillStyle = "#FBF8F0";
+    ctx.fillRect(0, 0, DRAW_CANVAS, DRAW_CANVAS);
+    strokesRef.current = [];
+    saveStroke();
+  }
+
+  // ゆびの いちを キャンバスの ざひょうに なおす
+  function posOf(e) {
+    const cv = canvasRef.current;
+    const rect = cv.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    return {
+      x: ((t.clientX - rect.left) / rect.width) * DRAW_CANVAS,
+      y: ((t.clientY - rect.top) / rect.height) * DRAW_CANVAS,
+    };
+  }
+
+  function strokeStart(e) {
+    e.preventDefault();
+    const cv = canvasRef.current;
+    if (!cv) return;
+    drawingRef.current = true;
+    const ctx = cv.getContext("2d");
+    const { x, y } = posOf(e);
+    ctx.beginPath();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = eraser ? "#FBF8F0" : drawColor;
+    ctx.lineWidth = eraser ? drawSize * 2.2 : drawSize;
+    ctx.moveTo(x, y);
+    // てんを うつだけでも かけるように
+    ctx.lineTo(x + 0.1, y + 0.1);
+    ctx.stroke();
+  }
+
+  function strokeMove(e) {
+    if (!drawingRef.current) return;
+    e.preventDefault();
+    const ctx = canvasRef.current.getContext("2d");
+    const { x, y } = posOf(e);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  }
+
+  function strokeEnd() {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    saveStroke();
+  }
+
+  // かきあがった えを とうろく画面へ
+  function finishDrawing() {
+    const cv = canvasRef.current;
+    if (!cv) return;
+    const out = document.createElement("canvas");
+    out.width = MY_IMG_SIZE;
+    out.height = MY_IMG_SIZE;
+    const ctx = out.getContext("2d");
+    ctx.fillStyle = "#FBF8F0";
+    ctx.fillRect(0, 0, MY_IMG_SIZE, MY_IMG_SIZE);
+    ctx.drawImage(cv, 0, 0, MY_IMG_SIZE, MY_IMG_SIZE);
+    setDraftImage(out.toDataURL("image/jpeg", 0.78));
+    setDraftName("");
+    setDrawOpen(false);
   }
 
   // ---------- ガチャ ----------
@@ -2559,7 +2799,7 @@ function MathMonsterBattle() {
           </div>
 
           <div className="start-monster" style={{ margin: "14px 0" }}>
-            <MonsterFace stage={stage} size={80} artStyle={artStyle} />
+            <MonsterFace stage={stage} size={80} artStyle={artStyle} skin={skinMonster} />
           </div>
 
           {hasProgress ? (
@@ -2761,27 +3001,24 @@ function MathMonsterBattle() {
           </button>
 
           {/* バトルに はいらずに ひらける */}
-          {hasProgress && (
-            <div style={styles.homeNavRow}>
-              {[
-                { id: "dex", label: "ずかん", emoji: "📖" },
-                { id: "shop", label: "ショップ", emoji: "🛒" },
-                { id: "gacha", label: "ガチャ", emoji: "🎁" },
-              ].map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => enterGame(t.id)}
-                  style={styles.homeNavBtn}
-                >
-                  <span style={{ fontSize: 19 }}>{t.emoji}</span>
-                  <span style={styles.homeNavLabel}>{t.label}</span>
-                  {t.id === "gacha" && freeGachaAvailable && (
-                    <span style={styles.freeDot}>むりょう</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
+          <div style={styles.homeNavRow}>
+            {[
+              { id: "dex", label: "ずかん", emoji: "📖" },
+              { id: "shop", label: "ショップ", emoji: "🛒" },
+              { id: "gacha", label: "ガチャ", emoji: "🎁" },
+            ].map((t) => (
+              <button key={t.id} onClick={() => enterGame(t.id)} style={styles.homeNavBtn}>
+                <span style={{ fontSize: 19 }}>{t.emoji}</span>
+                <span style={styles.homeNavLabel}>{t.label}</span>
+                {t.id === "gacha" && freeGachaAvailable && (
+                  <span style={styles.freeDot}>むりょう</span>
+                )}
+                {t.id === "dex" && myMonsters.length === 0 && (
+                  <span style={styles.freeDot}>おえかき</span>
+                )}
+              </button>
+            ))}
+          </div>
 
           {/* エンドレスタワー */}
           {towerUnlocked && (
@@ -2942,7 +3179,7 @@ function MathMonsterBattle() {
           {saveStatus === "error" ? "⚠ ほぞんできない" : saveStatus === "saving" ? "…" : "✓"}
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <MonsterFace stage={stage} size={30} artStyle={artStyle} />
+          <MonsterFace stage={stage} size={30} artStyle={artStyle} skin={skinMonster} />
           <div>
             <div style={styles.monsterNameSmall}>{stage.name}</div>
             {nextStage && (
@@ -3172,7 +3409,7 @@ function MathMonsterBattle() {
                 style={styles.fighterLeft}
               >
                 <span style={{ position: "relative", display: "inline-flex" }}>
-                  <MonsterFace stage={stage} size={64} artStyle={artStyle} />
+                  <MonsterFace stage={stage} size={64} artStyle={artStyle} skin={skinMonster} />
                   {equipped.hat && (
                     <span style={styles.hatOnFighter}>
                       {GACHA_ITEMS.find((g) => g.id === equipped.hat)?.emoji}
@@ -3332,7 +3569,7 @@ function MathMonsterBattle() {
       {tab === "battle" && stageClear && (
         <div style={styles.battleScreenPaused}>
           <div style={{ opacity: 0.5 }}>
-            <MonsterFace stage={stage} size={56} artStyle={artStyle} />
+            <MonsterFace stage={stage} size={56} artStyle={artStyle} skin={skinMonster} />
           </div>
           <div style={{ color: "#8A85B8", fontSize: 13 }}>
             つぎのステージへ すすむまえに、ずかんやショップを チェックできるよ
@@ -3512,8 +3749,11 @@ function MathMonsterBattle() {
             🎨 じぶんの モンスター({myMonsters.length}/{MY_MONSTER_MAX})
           </div>
           <div style={styles.myAddRow}>
+            <button onClick={openDraw} style={styles.drawAddBtn}>
+              ✏️ おえかきで つくる
+            </button>
             <label style={styles.myAddBtn}>
-              {imgBusy ? "よみこみちゅう..." : "＋ しゃしんから ついか"}
+              {imgBusy ? "よみこみちゅう..." : "📷 しゃしんから"}
               <input
                 type="file"
                 accept="image/*"
@@ -3534,6 +3774,28 @@ function MathMonsterBattle() {
                 maxLength={10}
                 style={styles.draftInput}
               />
+              <div style={styles.roleRow}>
+                {[
+                  { id: "ally", label: "なかま", emoji: "🤝" },
+                  { id: "enemy", label: "てき", emoji: "👾" },
+                ].map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => setDraftRole(r.id)}
+                    style={{
+                      ...styles.roleBtn,
+                      ...(draftRole === r.id ? styles.roleBtnActive : {}),
+                    }}
+                  >
+                    {r.emoji} {r.label}
+                  </button>
+                ))}
+              </div>
+              <div style={styles.roleHint}>
+                {draftRole === "ally"
+                  ? "じぶんの すがたに できるよ"
+                  : "バトルに てきとして でてくるよ"}
+              </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={saveMyMonster} style={styles.draftSave}>
                   とうろく
@@ -3545,18 +3807,50 @@ function MathMonsterBattle() {
             </div>
           )}
 
-          {myMonsters.length > 0 && (
-            <div style={styles.myGrid}>
-              {myMonsters.map((m) => (
-                <div key={m.id} style={styles.myCard}>
-                  <img src={m.image} alt={m.name} style={styles.myImg} />
-                  <div style={styles.myName}>{m.name}</div>
-                  <button onClick={() => deleteMyMonster(m.id)} style={styles.myDelete}>
-                    けす
-                  </button>
-                </div>
-              ))}
-            </div>
+          {myAllies.length > 0 && (
+            <>
+              <div style={styles.roleLabel}>🤝 なかま(タップで すがたを きりかえ)</div>
+              <div style={styles.myGrid}>
+                {myAllies.map((m) => (
+                  <div
+                    key={m.id}
+                    style={{
+                      ...styles.myCard,
+                      borderColor: skinId === m.id ? "#FFD23F" : "#362F66",
+                    }}
+                  >
+                    <img
+                      src={m.image}
+                      alt={m.name}
+                      style={{ ...styles.myImg, cursor: "pointer" }}
+                      onClick={() => toggleSkin(m.id)}
+                    />
+                    <div style={styles.myName}>{m.name}</div>
+                    {skinId === m.id && <div style={styles.skinTag}>そうびちゅう</div>}
+                    <button onClick={() => deleteMyMonster(m.id)} style={styles.myDelete}>
+                      けす
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {myEnemies.length > 0 && (
+            <>
+              <div style={styles.roleLabel}>👾 てき(バトルに でてくる)</div>
+              <div style={styles.myGrid}>
+                {myEnemies.map((m) => (
+                  <div key={m.id} style={styles.myCard}>
+                    <img src={m.image} alt={m.name} style={styles.myImg} />
+                    <div style={styles.myName}>{m.name}</div>
+                    <button onClick={() => deleteMyMonster(m.id)} style={styles.myDelete}>
+                      けす
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
 
           <div style={styles.shopGroupLabel}>🏅 しょうごう</div>
@@ -3681,6 +3975,87 @@ function MathMonsterBattle() {
           </div>
           <div style={styles.gachaNote}>
             おなじ ものが でたら かけらに かわるよ。かけら {SHARD_EXCHANGE}こで すきな ものと こうかんできる
+          </div>
+        </div>
+      )}
+
+      {/* おえかき */}
+      {drawOpen && (
+        <div style={styles.drawOverlay}>
+          <div style={styles.drawHeader}>
+            <button onClick={() => setDrawOpen(false)} style={styles.drawClose}>
+              ✕ やめる
+            </button>
+            <span style={styles.drawTitle}>モンスターを かこう</span>
+            <button onClick={finishDrawing} style={styles.drawDone}>
+              かんせい ▶
+            </button>
+          </div>
+
+          <div style={styles.canvasWrap}>
+            <canvas
+              ref={canvasRef}
+              style={styles.canvas}
+              onMouseDown={strokeStart}
+              onMouseMove={strokeMove}
+              onMouseUp={strokeEnd}
+              onMouseLeave={strokeEnd}
+            />
+          </div>
+
+          {/* いろ */}
+          <div style={styles.paletteRow}>
+            {DRAW_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => {
+                  setDrawColor(c);
+                  setEraser(false);
+                }}
+                style={{
+                  ...styles.colorDot,
+                  background: c,
+                  outline: !eraser && drawColor === c ? "3px solid #FFD23F" : "none",
+                }}
+                aria-label={c}
+              />
+            ))}
+          </div>
+
+          {/* ふとさ と どうぐ */}
+          <div style={styles.toolRow}>
+            {DRAW_SIZES.map((sz) => (
+              <button
+                key={sz}
+                onClick={() => setDrawSize(sz)}
+                style={{
+                  ...styles.sizeBtn,
+                  borderColor: drawSize === sz ? "#FFD23F" : "#4A4580",
+                }}
+              >
+                <span
+                  style={{
+                    display: "block",
+                    width: sz / 1.4 + 4,
+                    height: sz / 1.4 + 4,
+                    borderRadius: "50%",
+                    background: "#F5F3FF",
+                  }}
+                />
+              </button>
+            ))}
+            <button
+              onClick={() => setEraser((v) => !v)}
+              style={{ ...styles.toolBtn, ...(eraser ? styles.toolBtnActive : {}) }}
+            >
+              🧽 けしゴム
+            </button>
+            <button onClick={undoStroke} style={styles.toolBtn}>
+              ↩️ もどす
+            </button>
+            <button onClick={clearCanvas} style={styles.toolBtn}>
+              🗑️ ぜんぶけす
+            </button>
           </div>
         </div>
       )}
@@ -4592,9 +4967,167 @@ const styles = {
     color: "#FFD23F",
     marginTop: 3,
   },
+  roleRow: {
+    display: "flex",
+    gap: 8,
+  },
+  roleBtn: {
+    background: "#1E1C42",
+    border: "1px solid #4A4580",
+    borderRadius: 12,
+    padding: "7px 16px",
+    color: "#B8B3E0",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  roleBtnActive: {
+    background: "#3A3568",
+    borderColor: "#FFD23F",
+    color: "#FFD23F",
+  },
+  roleHint: {
+    fontSize: 10.5,
+    color: "#8A85B8",
+  },
+  roleLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#B8B3E0",
+    margin: "8px 0 6px",
+  },
+  skinTag: {
+    fontSize: 9,
+    fontWeight: 800,
+    color: "#FFD23F",
+    marginTop: 2,
+  },
+  drawOverlay: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 60,
+    overflow: "hidden",
+    overscrollBehavior: "none",
+    touchAction: "none",
+    background: "#16142F",
+    display: "flex",
+    flexDirection: "column",
+    paddingTop: "env(safe-area-inset-top)",
+    paddingBottom: "env(safe-area-inset-bottom)",
+  },
+  drawHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "10px 12px",
+    borderBottom: "1px solid #362F66",
+  },
+  drawTitle: {
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 15,
+    color: "#F5F3FF",
+  },
+  drawClose: {
+    background: "transparent",
+    border: "1px solid #4A4580",
+    borderRadius: 12,
+    padding: "7px 12px",
+    color: "#B8B3E0",
+    fontSize: 12,
+    cursor: "pointer",
+  },
+  drawDone: {
+    background: "linear-gradient(180deg, #FFD23F 0%, #FFB23F 100%)",
+    border: "none",
+    borderRadius: 14,
+    padding: "8px 16px",
+    color: "#3A2400",
+    fontSize: 13,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  canvasWrap: {
+    flex: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 10,
+    minHeight: 0,
+  },
+  canvas: {
+    width: "min(94vw, 62vh)",
+    height: "min(94vw, 62vh)",
+    background: "#FBF8F0",
+    borderRadius: 14,
+    border: "2px solid #4A4580",
+    touchAction: "none",
+    display: "block",
+  },
+  paletteRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+    justifyContent: "center",
+    padding: "4px 10px",
+  },
+  colorDot: {
+    width: 30,
+    height: 30,
+    borderRadius: "50%",
+    border: "2px solid #4A4580",
+    cursor: "pointer",
+    padding: 0,
+  },
+  toolRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 7,
+    justifyContent: "center",
+    padding: "8px 10px 12px",
+    alignItems: "center",
+  },
+  sizeBtn: {
+    width: 38,
+    height: 34,
+    borderRadius: 10,
+    border: "2px solid #4A4580",
+    background: "#22204A",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    padding: 0,
+  },
+  toolBtn: {
+    background: "#22204A",
+    border: "1px solid #4A4580",
+    borderRadius: 12,
+    padding: "7px 11px",
+    color: "#F5F3FF",
+    fontSize: 11.5,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  toolBtnActive: {
+    background: "#3A3568",
+    borderColor: "#FFD23F",
+    color: "#FFD23F",
+  },
+  drawAddBtn: {
+    background: "linear-gradient(180deg, #FFD23F 0%, #FFB23F 100%)",
+    border: "none",
+    borderRadius: 14,
+    padding: "10px 16px",
+    fontSize: 12.5,
+    fontWeight: 800,
+    color: "#3A2400",
+    cursor: "pointer",
+  },
   myAddRow: {
     display: "flex",
     justifyContent: "center",
+    gap: 8,
     marginBottom: 10,
   },
   myAddBtn: {
@@ -4655,7 +5188,9 @@ const styles = {
   },
   myCard: {
     background: "#22204A",
-    border: "1px solid #362F66",
+    borderWidth: 2,
+    borderStyle: "solid",
+    borderColor: "#362F66",
     borderRadius: 12,
     padding: 6,
     textAlign: "center",
