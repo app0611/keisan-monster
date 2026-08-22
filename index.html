@@ -127,15 +127,15 @@ const BRANCH_BONUS = {
 
 const STAGE_DEFS = {
   egg: { name: "たまご", emoji: "🥚", threshold: 0, maxHp: 20 },
-  nokosuko: { name: "ノコスコ", emoji: "🐣", threshold: 5, maxHp: 35, image: NOKOSUKO_IMG },
+  nokosuko: { name: "ノコスコ", emoji: "🐣", threshold: 10, maxHp: 35, image: NOKOSUKO_IMG },
   // スリカラの みち
-  surikara: { name: "スリカラ", emoji: "🦎", threshold: 15, maxHp: 58, image: SURIKARA_IMG },
-  mameizing: { name: "マメイジング", emoji: "🫘", threshold: 80, maxHp: 88 },
-  tsubasanomame: { name: "ツバサノマメ", emoji: "🪽", threshold: 180, maxHp: 130 },
+  surikara: { name: "スリカラ", emoji: "🦎", threshold: 35, maxHp: 58, image: SURIKARA_IMG },
+  mameizing: { name: "マメイジング", emoji: "🫘", threshold: 150, maxHp: 88 },
+  tsubasanomame: { name: "ツバサノマメ", emoji: "🪽", threshold: 400, maxHp: 130 },
   // ゲッコピカの みち
-  gekkopika: { name: "ゲッコピカ", emoji: "🐸", threshold: 15, maxHp: 50 },
-  suirin: { name: "スイリン", emoji: "💠", threshold: 80, maxHp: 78 },
-  nanoshi: { name: "なのし", emoji: "🌸", threshold: 180, maxHp: 118 },
+  gekkopika: { name: "ゲッコピカ", emoji: "🐸", threshold: 35, maxHp: 50 },
+  suirin: { name: "スイリン", emoji: "💠", threshold: 150, maxHp: 78 },
+  nanoshi: { name: "なのし", emoji: "🌸", threshold: 400, maxHp: 118 },
 };
 
 const BRANCH_PATHS = {
@@ -158,6 +158,9 @@ const ENEMIES = [
   { name: "メート", emoji: "📊", hp: 24, atk: 5, color: "#7FA8D9", art: "meter" },
   { name: "ジョッピー", emoji: "📏", hp: 28, atk: 6, color: "#EBD9A8", art: "joppy" },
   { name: "かまどこ", emoji: "🍥", hp: 32, atk: 7, color: "#F09AA8", art: "kamadoko" },
+  { name: "スル", emoji: "🪰", hp: 20, atk: 5, color: "#6E8FE0", art: "suru" },
+  { name: "ヒリ", emoji: "🐝", hp: 30, atk: 6, color: "#F2D64B", art: "hiri" },
+  { name: "カエ", emoji: "🦟", hp: 38, atk: 8, color: "#D9424A", art: "kae" },
 ];
 
 // ボスは 四則演算モチーフ
@@ -165,6 +168,7 @@ const BOSSES = [
   { name: "マイナスのサーファー", emoji: "🏄", hp: 46, atk: 8, color: "#7FB6E8", art: "minus" },
   { name: "プラス教徒", emoji: "➕", hp: 60, atk: 10, color: "#D93A3A", art: "plus" },
   { name: "魔王子カケル", emoji: "✖️", hp: 82, atk: 13, color: "#C9364A", art: "kakeru" },
+  { name: "ワルニキ", emoji: "➗", hp: 104, atk: 15, color: "#4A3A2A", art: "waruniki" },
 ];
 
 // 会心の一撃: このわりあいの じかん内に こたえると はつどう
@@ -174,6 +178,66 @@ const CRIT_MULTIPLIER = 1.5;
 
 // 何ステージごとに ボスが でるか
 const BOSS_INTERVAL = 3;
+
+// ---------- けいけんち ----------
+const EXP_PER_CORRECT = 1;   // せいかい 1もん
+const EXP_PER_STAGE = 3;     // ふつうの ステージ クリア
+const EXP_PER_BOSS = 20;     // ボス げきは
+
+// ---------- タイムゲージ ----------
+// ステージが すすむほど じかんが みじかくなる(さいたん 60%)
+function stageTimeFactor(stageNumber, isBoss) {
+  const step = Math.floor((stageNumber - 1) / 5) * 0.05;
+  const base = Math.max(0.6, 1 - step);
+  return isBoss ? base * 0.9 : base;
+}
+
+// ---------- エンドレスタワー ----------
+// さいしゅうしんか したら あそべる。かいを のぼるほど ボスが つよくなる
+function towerEnemy(floor) {
+  const base = BOSSES[(floor - 1) % BOSSES.length];
+  const mul = 1 + (floor - 1) * 0.22;
+  return {
+    ...base,
+    name: `${base.name} ${floor}かい`,
+    hp: Math.round(base.hp * mul),
+    atk: Math.round(base.atk * (1 + (floor - 1) * 0.12)),
+    isBoss: true,
+    isTower: true,
+  };
+}
+
+// ---------- しょうごう(じっせき) ----------
+const ACHIEVEMENTS = [
+  { id: "first-evo", emoji: "🐣", name: "はじめての しんか", desc: "1かい しんかする",
+    check: (r) => r.evolveCount >= 1 },
+  { id: "boss3", emoji: "👑", name: "ボスハンター", desc: "ボスを 3たい たおす",
+    check: (r) => r.bossDefeated >= 3 },
+  { id: "boss10", emoji: "🏆", name: "ボスマスター", desc: "ボスを 10たい たおす",
+    check: (r) => r.bossDefeated >= 10 },
+  { id: "correct100", emoji: "💯", name: "100もん せいかい", desc: "つうさん 100もん せいかい",
+    check: (r) => r.correctCount >= 100 },
+  { id: "correct500", emoji: "🎓", name: "けいさん はかせ", desc: "つうさん 500もん せいかい",
+    check: (r) => r.correctCount >= 500 },
+  { id: "streak20", emoji: "🔥", name: "20れんぞく", desc: "20もん れんぞく せいかい",
+    check: (r) => r.maxStreak >= 20 },
+  { id: "crit50", emoji: "⚡", name: "かいしんの たつじん", desc: "会心の一撃を 50かい だす",
+    check: (r) => r.critCount >= 50 },
+  { id: "kuku", emoji: "✖️", name: "九九 ぜんだん せいは", desc: "1〜9のだんを それぞれ 10もん せいかい",
+    check: (r) => [1,2,3,4,5,6,7,8,9].every((n) => (r.tableCorrect?.[n] || 0) >= 10) },
+  { id: "final", emoji: "🪽", name: "さいしゅう しんか", desc: "さいごの すがたに なる",
+    check: (r) => r.reachedFinal },
+  { id: "rebirth1", emoji: "🔄", name: "てんせい", desc: "1かい てんせいする",
+    check: (r) => r.rebirth >= 1 },
+  { id: "bothroutes", emoji: "🌗", name: "りょうほうの みち", desc: "2つの しんかルートを どちらも たいけんする",
+    check: (r) => (r.seenBranches?.length || 0) >= 2 },
+  { id: "tower5", emoji: "🗼", name: "タワー 5かい", desc: "エンドレスタワーで 5かいまで のぼる",
+    check: (r) => r.bestFloor >= 5 },
+  { id: "tower15", emoji: "🌟", name: "タワー 15かい", desc: "エンドレスタワーで 15かいまで のぼる",
+    check: (r) => r.bestFloor >= 15 },
+  { id: "shopper", emoji: "🛒", name: "そうび コンプリート", desc: "そうびを ぜんぶ そろえる",
+    check: (r) => (r.owned?.length || 0) >= 11 },
+];
 
 const SHOP_ITEMS = [
   // ぶき(こうげきりょく)
@@ -1131,6 +1195,121 @@ function KamadokoArt({ size }) {
   );
 }
 
+// ライジング3きょうだい: ほそながい からだに はねが ついた すがた
+function RisingBrother({ size, color, dark, hasBoard, wingSpan, headRx, headRy }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100">
+      {/* はね */}
+      <ellipse cx={50 - wingSpan} cy="46" rx={wingSpan * 0.62} ry="9" fill={color} stroke={color} strokeWidth="2" />
+      <ellipse cx={50 + wingSpan} cy="46" rx={wingSpan * 0.62} ry="9" fill={color} stroke={color} strokeWidth="2" />
+      <ellipse cx={50 - wingSpan} cy="46" rx={wingSpan * 0.34} ry="3.4" fill={dark} />
+      <ellipse cx={50 + wingSpan} cy="46" rx={wingSpan * 0.34} ry="3.4" fill={dark} />
+      {/* あし(4ほん) */}
+      <g stroke={color} strokeWidth="2.6" fill="none" strokeLinecap="round">
+        <path d="M42 68 Q34 78 33 90" />
+        <path d="M46 70 Q42 80 44 90" />
+        <path d="M54 70 Q58 80 56 90" />
+        <path d="M58 68 Q66 78 67 90" />
+      </g>
+      <ellipse cx="42" cy="70" rx="4.6" ry="6" fill={color} />
+      <ellipse cx="58" cy="70" rx="4.6" ry="6" fill={color} />
+      {/* からだ */}
+      <rect x="41" y="34" width="18" height="34" rx="3" fill={color} stroke={color} strokeWidth="2" />
+      {/* あたま */}
+      <ellipse cx="50" cy="24" rx={headRx} ry={headRy} fill={color} stroke={color} strokeWidth="2" />
+      <ellipse cx={50 - headRx * 0.35} cy="22" rx="3.2" ry="4.6" fill={dark} />
+      <ellipse cx={50 + headRx * 0.35} cy="22" rx="3.2" ry="4.6" fill={dark} />
+      <path d={`M${50 - headRx * 0.3} 30 Q50 34 ${50 + headRx * 0.3} 30`} stroke="#C0392B" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+      {/* スルだけ もっている しかくい もの */}
+      {hasBoard && (
+        <rect x="58" y="6" width="20" height="20" rx="2" fill="none" stroke="#3A3A3A" strokeWidth="2.4" />
+      )}
+    </svg>
+  );
+}
+
+// スル(あお・いちばん ほそい)
+function SuruArt({ size }) {
+  return <RisingBrother size={size} color="#6E8FE0" dark="#2B3A5C" hasBoard wingSpan={16} headRx={7} headRy={11} />;
+}
+
+// ヒリ(きいろ・まんなか)
+function HiriArt({ size }) {
+  return <RisingBrother size={size} color="#F2D64B" dark="#4A4230" wingSpan={26} headRx={13} headRy={12} />;
+}
+
+// カエ(あか・つよそう)
+function KaeArt({ size }) {
+  return <RisingBrother size={size} color="#D9424A" dark="#5C1F24" wingSpan={22} headRx={11} headRy={9} />;
+}
+
+// ワルニキ(ボス・わりざん)
+function WarunikiArt({ size }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100">
+      {/* ながい うで(あたまの うえを こえて のびる) */}
+      <path
+        d="M62 46 Q92 40 88 14 Q84 2 66 4"
+        fill="none"
+        stroke="#4A3A2A"
+        strokeWidth="9"
+        strokeLinecap="round"
+      />
+      {/* うでの さきの きいろい たま */}
+      <circle cx="60" cy="6" r="7" fill="#F2CE3C" stroke="#C9A32B" strokeWidth="1.6" />
+      {/* リーゼント(÷の よこぼうを あらわす きんぱつ) */}
+      {/* うしろに ながれる ボリューム */}
+      <path
+        d="M32 32 Q26 14 44 9 Q64 3 76 12 Q86 20 80 31 L80 34 L32 34 Z"
+        fill="#F2CE3C"
+        stroke="#2B2B2B"
+        strokeWidth="2.2"
+        strokeLinejoin="round"
+      />
+      {/* まえの まきあげ(リーゼントの かなめ) */}
+      <path
+        d="M33 31 Q20 27 24 16 Q28 6 41 9 Q33 13 32 19 Q31 26 38 28 Z"
+        fill="#F2CE3C"
+        stroke="#2B2B2B"
+        strokeWidth="2.2"
+        strokeLinejoin="round"
+      />
+      {/* ながれの すじ */}
+      <g stroke="#C9A32B" strokeWidth="1.4" fill="none" strokeLinecap="round">
+        <path d="M44 12 Q56 10 70 16" />
+        <path d="M42 18 Q56 16 74 22" />
+        <path d="M29 20 Q31 15 37 13" />
+      </g>
+      {/* かお */}
+      <path d="M34 30 L66 30 L66 52 Q50 58 34 52 Z" fill="#F7F2E8" stroke="#2B2B2B" strokeWidth="2" strokeLinejoin="round" />
+      {/* サングラス */}
+      <g fill="#6B5426" stroke="#2B2B2B" strokeWidth="1.8">
+        <rect x="36" y="35" width="12" height="8" rx="2" />
+        <rect x="52" y="35" width="12" height="8" rx="2" />
+      </g>
+      <path d="M48 39 L52 39" stroke="#2B2B2B" strokeWidth="1.8" />
+      <path d="M44 49 Q50 52 57 48" stroke="#8A6A5C" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+      {/* くろい スーツ */}
+      <rect x="36" y="54" width="28" height="22" rx="2" fill="#2B2B2B" />
+      <path d="M46 54 L50 62 L54 54 Z" fill="#F7F2E8" />
+      {/* ズボン */}
+      <path d="M37 76 L45 76 L44 92 L36 92 Z" fill="#1E1E1E" />
+      <path d="M55 76 L63 76 L64 92 L56 92 Z" fill="#1E1E1E" />
+      <ellipse cx="40" cy="94" rx="8" ry="4" fill="none" stroke="#2B2B2B" strokeWidth="2" />
+      <ellipse cx="60" cy="94" rx="8" ry="4" fill="none" stroke="#2B2B2B" strokeWidth="2" />
+      {/* もういっぽうの うでと たま */}
+      <path d="M38 56 Q26 52 24 44" stroke="#2B2B2B" strokeWidth="6" fill="none" strokeLinecap="round" />
+      <circle cx="22" cy="40" r="7" fill="#F2CE3C" stroke="#C9A32B" strokeWidth="1.6" />
+      {/* ÷ の しるし */}
+      <g fill="#2B2B2B">
+        <circle cx="12" cy="72" r="2.6" />
+        <rect x="5" y="77" width="14" height="2.6" rx="1.3" />
+        <circle cx="12" cy="85" r="2.6" />
+      </g>
+    </svg>
+  );
+}
+
 // マイナスのサーファー(ボス)
 function MinusSurferArt({ size }) {
   return (
@@ -1268,6 +1447,10 @@ const ENEMY_ART = {
   minus: MinusSurferArt,
   plus: PlusKyotoArt,
   kakeru: MaouKakeruArt,
+  suru: SuruArt,
+  hiri: HiriArt,
+  kae: KaeArt,
+  waruniki: WarunikiArt,
 };
 
 // てきを えがく
@@ -1334,6 +1517,22 @@ function MathMonsterBattle() {
   const [evolveEvent, setEvolveEvent] = useState(null); // {from, to, phase:'shake'|'reveal'}
   const [branch, setBranch] = useState(null); // 'surikara' | 'gekkopika'
   const [branchPrompt, setBranchPrompt] = useState(false);
+  const [exp, setExp] = useState(0);
+  const [rebirth, setRebirth] = useState(0);
+  const [towerMode, setTowerMode] = useState(false);
+  const [towerFloor, setTowerFloor] = useState(1);
+  const [bestFloor, setBestFloor] = useState(0);
+  const [towerResult, setTowerResult] = useState(null);
+  const [records, setRecords] = useState({
+    bossDefeated: 0,
+    critCount: 0,
+    maxStreak: 0,
+    evolveCount: 0,
+    tableCorrect: {},
+    seenBranches: [],
+    reachedFinal: false,
+  });
+  const [confirmRebirth, setConfirmRebirth] = useState(false);
   const [saveStatus, setSaveStatus] = useState("idle"); // 'idle'|'saving'|'saved'|'error'
   const [saveSupported, setSaveSupported] = useState(true);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -1367,20 +1566,32 @@ function MathMonsterBattle() {
   const stageStartTime = useRef(Date.now());
   const recentResultsRef = useRef([]);
 
-  const stats = statsFor(owned, branch);
+  const statsBase = statsFor(owned, branch);
+  const stats = {
+    ...statsBase,
+    atk: statsBase.atk + rebirth,
+    pointMult: statsBase.pointMult * (1 + rebirth * 0.1),
+  };
   // みちの とくちょうで かんがえる じかんが かわる
-  const timeFor = (base, b = branch) =>
-    Math.round(base * ((BRANCH_BONUS[b] && BRANCH_BONUS[b].timeMult) || 1));
+  const timeFor = (base, b = branch) => {
+    const branchMult = (BRANCH_BONUS[b] && BRANCH_BONUS[b].timeMult) || 1;
+    const stageMult = towerMode
+      ? stageTimeFactor(towerFloor * BOSS_INTERVAL, true)
+      : stageTimeFactor(stageNumber, isBossStage(stageNumber));
+    return Math.round(base * branchMult * stageMult);
+  };
   const thresholdFor = (st) => Math.ceil(st.threshold * stats.thresholdMult);
 
   const stagePath = stagePathFor(branch);
   const stageIndex = (() => {
     let idx = 0;
     stagePath.forEach((s, i) => {
-      if (correctCount >= thresholdFor(s)) idx = i;
+      if (exp >= thresholdFor(s)) idx = i;
     });
     return idx;
   })();
+  const isFinalForm = stageIndex === stagePath.length - 1 && stagePath.length === 5;
+  const towerUnlocked = isFinalForm || bestFloor > 0 || rebirth > 0;
   const stage = stagePath[stageIndex];
   const nextStage = stagePath[stageIndex + 1];
   const maxHp = stage.maxHp + stats.bonusHp;
@@ -1408,13 +1619,19 @@ function MathMonsterBattle() {
           if (data.mode) setMode(data.mode);
           if (data.selectedTables) setSelectedTables(data.selectedTables);
           if (data.bag) setBag(data.bag);
+          if (typeof data.exp === "number") setExp(data.exp);
+          else if (typeof data.correctCount === "number") setExp(data.correctCount); // ふるいセーブの ひきつぎ
+          if (data.rebirth) setRebirth(data.rebirth);
+          if (data.bestFloor) setBestFloor(data.bestFloor);
+          if (data.records) setRecords((r) => ({ ...r, ...data.records }));
           if (data.savedAt) setSavedAt(data.savedAt);
           setEnemyHp(data.enemyHp ?? enemyForStage(sn).hp);
           if (data.branch) setBranch(data.branch);
           const savedPath = stagePathFor(data.branch ?? null);
+          const savedExp = typeof data.exp === "number" ? data.exp : data.correctCount ?? 0;
           let stIdx = 0;
           savedPath.forEach((sv, i) => {
-            if ((data.correctCount ?? 0) >= sv.threshold) stIdx = i;
+            if (savedExp >= sv.threshold) stIdx = i;
           });
           const st = savedPath[stIdx];
           setPlayerHp(data.playerHp ?? (st ? st.maxHp : STAGE_DEFS.egg.maxHp));
@@ -1457,6 +1674,10 @@ function MathMonsterBattle() {
             selectedTables,
             bag,
             branch,
+            exp,
+            rebirth,
+            bestFloor,
+            records,
             savedAt: Date.now(),
           })
         );
@@ -1482,6 +1703,10 @@ function MathMonsterBattle() {
     selectedTables,
     bag,
     branch,
+    exp,
+    rebirth,
+    bestFloor,
+    records,
   ]);
 
   // さいしょから やりなおす
@@ -1503,6 +1728,21 @@ function MathMonsterBattle() {
     setPlayerHp(STAGE_DEFS.egg.maxHp);
     setBranch(null);
     setBranchPrompt(false);
+    setExp(0);
+    setRebirth(0);
+    setBestFloor(0);
+    setTowerMode(false);
+    setTowerFloor(1);
+    setTowerResult(null);
+    setRecords({
+      bossDefeated: 0,
+      critCount: 0,
+      maxStreak: 0,
+      evolveCount: 0,
+      tableCorrect: {},
+      seenBranches: [],
+      reachedFinal: false,
+    });
     setStageClear(null);
     setEvolveEvent(null);
     prevStageIndex.current = 0;
@@ -1619,9 +1859,25 @@ function MathMonsterBattle() {
       setFeedback({ type: isCritical ? "critical" : "correct" });
       setFloatingText(isCritical ? `会心の一撃! -${dmg}` : `+${gained}`);
       setFlashEnemy(true);
-      setStreak((s) => s + 1);
+      setStreak((s) => {
+        const ns = s + 1;
+        setRecords((r) => (ns > r.maxStreak ? { ...r, maxStreak: ns } : r));
+        return ns;
+      });
       setPoints((p) => p + gained);
       setCorrectCount((c) => c + 1);
+      setExp((e) => e + EXP_PER_CORRECT);
+      if (isCritical) setRecords((r) => ({ ...r, critCount: r.critCount + 1 }));
+      // 九九は だんごとに かぞえる(しょうごうよう)
+      if (problem.text && problem.text.includes("×")) {
+        const a = parseInt(problem.text.split("×")[0].trim(), 10);
+        if (a >= 1 && a <= 9) {
+          setRecords((r) => ({
+            ...r,
+            tableCorrect: { ...r.tableCorrect, [a]: (r.tableCorrect[a] || 0) + 1 },
+          }));
+        }
+      }
       setEnemyHp((hp) => Math.max(0, hp - dmg));
     } else {
       const type = forcedType === "timeout" ? "timeout" : "wrong";
@@ -1657,9 +1913,15 @@ function MathMonsterBattle() {
         const elapsed = Date.now() - stageStartTime.current;
         const bonus = timeBonusFor(elapsed, beaten.isBoss);
         if (bonus > 0) setPoints((pt) => pt + bonus);
+        const gainedExp = beaten.isBoss ? EXP_PER_BOSS : EXP_PER_STAGE;
+        setExp((e) => e + gainedExp);
+        if (beaten.isBoss) {
+          setRecords((r) => ({ ...r, bossDefeated: r.bossDefeated + 1 }));
+        }
         setStageClear({
           defeatedName: beaten.name,
           wasBoss: beaten.isBoss,
+          expGained: beaten.isBoss ? EXP_PER_BOSS : EXP_PER_STAGE,
           pointsEarned: points - stageStartPoints.current,
           clearedStage: stageNumber,
           elapsed,
@@ -1672,6 +1934,27 @@ function MathMonsterBattle() {
   }, [enemyHp]);
 
   function proceedToNextStage() {
+    if (towerMode) {
+      const nextFloor = towerFloor + 1;
+      setTowerFloor(nextFloor);
+      setBestFloor((b) => Math.max(b, nextFloor - 1));
+      setEnemyHp(towerEnemy(nextFloor).hp);
+      // かいごとに すこしだけ かいふく
+      setPlayerHp((hp) => Math.min(maxHp, hp + Math.round(maxHp * 0.3)));
+      stageStartPoints.current = points;
+      stageStartTime.current = Date.now();
+      setStageClear(null);
+      setTab("battle");
+      const b2 = buildProblemState(nextFloor * BOSS_INTERVAL, difficulty, recentResultsRef.current, mode, selectedTables);
+      setProblem(b2.problem);
+      setChoices(b2.choices);
+      setTimeLimit(timeFor(b2.timeLimit));
+      setCurrentLevel(b2.level);
+      setTimeLeftRatio(1);
+      remainingRef.current = timeFor(b2.timeLimit);
+      answeredRef.current = false;
+      return;
+    }
     const next = stageNumber + 1;
     setStageNumber(next);
     setEnemyHp(enemyForStage(next).hp);
@@ -1697,9 +1980,19 @@ function MathMonsterBattle() {
         if (bag.seed > 0) {
           setBag((b) => ({ ...b, seed: b.seed - 1 }));
           setItemToast("🌱 ふっかつのタネで たちあがった!");
-        } else {
-          setPoints((p) => Math.max(0, p - 3));
+          setPlayerHp(maxHp);
+          return;
         }
+        if (towerMode) {
+          // タワーは ここで しゅうりょう
+          const reached = towerFloor;
+          setBestFloor((b) => Math.max(b, reached));
+          setTowerResult({ floor: reached, best: Math.max(bestFloor, reached) });
+          setTowerMode(false);
+          setPlayerHp(maxHp);
+          return;
+        }
+        setPoints((p) => Math.max(0, p - 3));
         setPlayerHp(maxHp);
       }, 900);
       return () => clearTimeout(t);
@@ -1717,6 +2010,11 @@ function MathMonsterBattle() {
       setPlayerHp(to.maxHp + stats.bonusHp);
       if (stageIndex > 0) {
         setEvolveEvent({ from, to, phase: "shake" });
+        setRecords((r) => ({
+          ...r,
+          evolveCount: r.evolveCount + 1,
+          reachedFinal: r.reachedFinal || stageIndex === stagePath.length - 1,
+        }));
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1734,7 +2032,7 @@ function MathMonsterBattle() {
     if (!loaded || screen !== "game") return;
     if (branch) return;
     const nokosukoNext = Math.ceil(STAGE_DEFS.surikara.threshold * stats.thresholdMult);
-    if (correctCount >= nokosukoNext && !branchPrompt && !evolveEvent) {
+    if (exp >= nokosukoNext && !branchPrompt && !evolveEvent) {
       setBranchPrompt(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1743,6 +2041,10 @@ function MathMonsterBattle() {
   function chooseBranch(id) {
     setBranch(id);
     setBranchPrompt(false);
+    setRecords((r) => ({
+      ...r,
+      seenBranches: r.seenBranches.includes(id) ? r.seenBranches : [...r.seenBranches, id],
+    }));
   }
 
   // 進化演出のフェーズ進行(ぶるぶる → まぶしい光 → お披露目)
@@ -1803,7 +2105,7 @@ function MathMonsterBattle() {
     setBag((b) => ({ ...b, [id]: b[id] - 1 }));
   }
 
-  const enemy = enemyForStage(stageNumber);
+  const enemy = towerMode ? towerEnemy(towerFloor) : enemyForStage(stageNumber);
   const enemyMaxHp = enemy.hp;
 
   if (!loaded) {
@@ -1833,6 +2135,54 @@ function MathMonsterBattle() {
   }
 
   const hasProgress = correctCount > 0 || points > 0;
+
+  // エンドレスタワーを はじめる
+  function startTower() {
+    setTowerMode(true);
+    setTowerFloor(1);
+    setTowerResult(null);
+    setEnemyHp(towerEnemy(1).hp);
+    setPlayerHp(maxHp);
+    setStageClear(null);
+    setTab("battle");
+    stageStartPoints.current = points;
+    stageStartTime.current = Date.now();
+    recentResultsRef.current = [];
+    const built = buildProblemState(BOSS_INTERVAL, difficulty, [], mode, selectedTables);
+    setProblem(built.problem);
+    setChoices(built.choices);
+    const lim = Math.round(built.timeLimit * ((BRANCH_BONUS[branch] && BRANCH_BONUS[branch].timeMult) || 1) * stageTimeFactor(BOSS_INTERVAL, true));
+    setTimeLimit(lim);
+    remainingRef.current = lim;
+    setCurrentLevel(built.level);
+    setTimeLeftRatio(1);
+    answeredRef.current = false;
+    setScreen("game");
+  }
+
+  // てんせい: そうびと ポイントは のこして さいしょから
+  function doRebirth() {
+    setRebirth((n) => n + 1);
+    setExp(0);
+    setCorrectCount(0);
+    setStreak(0);
+    setBranch(null);
+    setBranchPrompt(false);
+    setStageNumber(1);
+    setEnemyHp(enemyForStage(1).hp);
+    setPlayerHp(STAGE_DEFS.egg.maxHp + stats.bonusHp);
+    setStageClear(null);
+    setEvolveEvent(null);
+    setTowerMode(false);
+    setTowerResult(null);
+    prevStageIndex.current = 0;
+    stageStartPoints.current = points;
+    stageStartTime.current = Date.now();
+    recentResultsRef.current = [];
+    setConfirmRebirth(false);
+    setItemToast("🔄 てんせいした! そうびは そのまま");
+    setScreen("start");
+  }
 
   if (screen === "start") {
     return (
@@ -1870,6 +2220,22 @@ function MathMonsterBattle() {
         </div>
 
         <div style={styles.startContent}>
+          {towerResult && (
+            <div style={styles.towerResult}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#FFD23F" }}>
+                🗼 タワー しゅうりょう
+              </div>
+              <div style={{ fontSize: 13, marginTop: 4 }}>
+                {towerResult.floor}かいまで のぼった!
+              </div>
+              <div style={{ fontSize: 11, color: "#B8B3E0", marginTop: 2 }}>
+                さいこう きろく {towerResult.best}かい
+              </div>
+              <button onClick={() => setTowerResult(null)} style={styles.resetNoBtn}>
+                とじる
+              </button>
+            </div>
+          )}
           <div style={styles.startEyebrow}>けいさん × モンスターバトル</div>
           <div className="start-title" style={styles.startTitle}>
             けいさん
@@ -1888,11 +2254,12 @@ function MathMonsterBattle() {
                 <span>💰 {points}</span>
               </div>
               <div style={styles.startStatusSub}>
-                ステージ {stageNumber} ・ せいかい {correctCount}かい
+                ステージ {stageNumber} ・ けいけんち {exp}
+                {rebirth > 0 && <span style={styles.rebirthTag}>てんせい ★{rebirth}</span>}
                 {nextStage && (
                   <>
                     <br />
-                    つぎの しんかまで あと {Math.max(0, thresholdFor(nextStage) - correctCount)}かい
+                    つぎの しんかまで けいけんち あと {Math.max(0, thresholdFor(nextStage) - exp)}
                   </>
                 )}
               </div>
@@ -2068,6 +2435,42 @@ function MathMonsterBattle() {
             <span>🛒 そうびする</span>
           </div>
 
+          {/* エンドレスタワー */}
+          {towerUnlocked && (
+            <div style={styles.towerBox}>
+              <button onClick={startTower} style={styles.towerBtn}>
+                🗼 エンドレスタワーに いどむ
+              </button>
+              <div style={styles.towerBest}>
+                さいこう きろく: {bestFloor > 0 ? `${bestFloor}かい` : "まだ なし"}
+              </div>
+            </div>
+          )}
+
+          {/* てんせい */}
+          {isFinalForm && (
+            <div style={styles.towerBox}>
+              {confirmRebirth ? (
+                <div style={styles.resetConfirmRow}>
+                  <span style={{ fontSize: 11, color: "#FFB199" }}>たまごに もどる?</span>
+                  <button onClick={doRebirth} style={styles.resetYesBtn}>
+                    てんせい
+                  </button>
+                  <button onClick={() => setConfirmRebirth(false)} style={styles.resetNoBtn}>
+                    やめる
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmRebirth(true)} style={styles.rebirthBtn}>
+                  🔄 てんせいする(そうびは そのまま)
+                </button>
+              )}
+              <div style={styles.towerBest}>
+                てんせいすると こうげき+1 ・ ポイント+10% ・ みちを えらびなおせる
+              </div>
+            </div>
+          )}
+
           {/* ぼうけんのきろく */}
           <div style={styles.saveBox}>
             {!saveSupported ? (
@@ -2183,7 +2586,7 @@ function MathMonsterBattle() {
             {nextStage && (
               <div style={styles.progressWrap}>
                 <span style={styles.progressText}>
-                  あと {Math.max(0, thresholdFor(nextStage) - correctCount)}
+                  あと {Math.max(0, thresholdFor(nextStage) - exp)}
                 </span>
               <div style={styles.progressTrack}>
                 <div
@@ -2191,7 +2594,7 @@ function MathMonsterBattle() {
                     ...styles.progressFill,
                     width: `${Math.min(
                       100,
-                      ((correctCount - thresholdFor(stage)) /
+                      ((exp - thresholdFor(stage)) /
                         (thresholdFor(nextStage) - thresholdFor(stage))) *
                         100
                     )}%`,
@@ -2313,16 +2716,20 @@ function MathMonsterBattle() {
             )}
           </div>
           <div style={styles.clearReward}>
-            💰 +{stageClear.pointsEarned + stageClear.timeBonus} ポイント かくとく
+            💰 +{stageClear.pointsEarned + stageClear.timeBonus} ポイント
           </div>
-          {isBossStage(stageNumber + 1) && (
+          <div style={styles.clearExp}>
+            ⭐ けいけんち +{stageClear.expGained}
+            {stageClear.wasBoss && <span style={styles.expBig}>ボスボーナス!</span>}
+          </div>
+          {!towerMode && isBossStage(stageNumber + 1) && (
             <div style={styles.nextBossWarn}>
               つぎは ボスせん! そうびを ととのえよう
             </div>
           )}
           <div style={styles.clearHint}>今のうちに ずかん や ショップ を チェックしよう</div>
           <button onClick={proceedToNextStage} style={styles.clearNextBtn}>
-            つぎのステージへ ▶
+            {towerMode ? "つぎの かいへ ▶" : "つぎのステージへ ▶"}
           </button>
         </div>
       )}
@@ -2332,8 +2739,8 @@ function MathMonsterBattle() {
         <div style={styles.battleScreen}>
           <div style={styles.stageLabelRow}>
             <span style={styles.stageLabel}>
-              ステージ {stageNumber}
-              {enemy.isBoss && <span style={styles.bossTag}>👑 ボス</span>}
+              {towerMode ? `🗼 タワー ${towerFloor}かい` : `ステージ ${stageNumber}`}
+              {enemy.isBoss && !towerMode && <span style={styles.bossTag}>👑 ボス</span>}
             </span>
             <span style={styles.levelBadge}>
               {mode === "addsub"
@@ -2669,7 +3076,7 @@ function MathMonsterBattle() {
                     const st = { id, ...STAGE_DEFS[id] };
                     const unlocked =
                       (branch === b.id || id === "egg" || id === "nokosuko") &&
-                      correctCount >= thresholdFor(st);
+                      exp >= thresholdFor(st);
                     return (
                       <div
                         key={id}
@@ -2703,6 +3110,32 @@ function MathMonsterBattle() {
                   <EnemyFace enemy={e} size={40} />
                   <div style={styles.dexName}>{e.name}</div>
                   <div style={styles.dexReq}>HP{e.hp} ・ こうげき{e.atk}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={styles.shopGroupLabel}>🏅 しょうごう</div>
+          <div style={styles.dexList}>
+            {ACHIEVEMENTS.map((a) => {
+              const got = a.check({ ...records, correctCount, rebirth, bestFloor, owned });
+              return (
+                <div
+                  key={a.id}
+                  style={{
+                    ...styles.dexCard,
+                    opacity: got ? 1 : 0.4,
+                    borderColor: got ? "#7ED957" : "#4A4580",
+                  }}
+                >
+                  <div style={{ fontSize: 26, width: 34, textAlign: "center" }}>
+                    {got ? a.emoji : "🔒"}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={styles.dexName}>{a.name}</div>
+                    <div style={styles.dexReq}>{a.desc}</div>
+                  </div>
+                  {got && <span style={styles.gotTag}>たっせい</span>}
                 </div>
               );
             })}
@@ -3268,6 +3701,81 @@ const styles = {
     padding: "1px 7px",
     fontSize: 11,
     fontWeight: 800,
+  },
+  clearExp: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#FFD23F",
+    marginTop: 3,
+  },
+  expBig: {
+    marginLeft: 6,
+    fontSize: 11,
+    background: "#FF6B4A",
+    color: "#2B0A00",
+    borderRadius: 8,
+    padding: "1px 7px",
+  },
+  towerBox: {
+    marginTop: 14,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 5,
+  },
+  towerBtn: {
+    background: "linear-gradient(180deg, #7B52C4 0%, #5B3A9E 100%)",
+    color: "#F5F3FF",
+    border: "none",
+    borderRadius: 22,
+    padding: "11px 24px",
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 14,
+    cursor: "pointer",
+    boxShadow: "0 4px 0 #3E2870",
+  },
+  rebirthBtn: {
+    background: "transparent",
+    border: "1px solid #FFD23F",
+    borderRadius: 20,
+    padding: "9px 18px",
+    color: "#FFD23F",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  towerBest: {
+    fontSize: 10.5,
+    color: "#8A85B8",
+    textAlign: "center",
+    lineHeight: 1.5,
+  },
+  towerResult: {
+    background: "#22204A",
+    border: "2px solid #FFD23F",
+    borderRadius: 14,
+    padding: "12px 18px",
+    marginBottom: 14,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 4,
+  },
+  rebirthTag: {
+    marginLeft: 6,
+    background: "#7B52C4",
+    color: "#F5F3FF",
+    borderRadius: 8,
+    padding: "1px 7px",
+    fontSize: 10,
+    fontWeight: 800,
+  },
+  gotTag: {
+    fontSize: 10,
+    fontWeight: 800,
+    color: "#7ED957",
+    whiteSpace: "nowrap",
   },
   clearTimeRow: {
     display: "flex",
