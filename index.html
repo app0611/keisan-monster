@@ -210,6 +210,87 @@ function towerEnemy(floor) {
   };
 }
 
+// ---------- じさく モンスター ----------
+const MY_MONSTER_MAX = 12;      // ほぞんできる かず
+const MY_IMG_SIZE = 260;        // ほぞんする がぞうの おおきさ(px)
+
+// しゃしんを せいほうけいに きりぬいて ちいさくする
+function shrinkImage(file, size = MY_IMG_SIZE) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("よみこみに しっぱいしました"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("がぞうを ひらけませんでした"));
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#FBF8F0";
+        ctx.fillRect(0, 0, size, size);
+        // まんなかを せいほうけいで きりぬく
+        const side = Math.min(img.width, img.height);
+        const sx = (img.width - side) / 2;
+        const sy = (img.height - side) / 2;
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+        resolve(canvas.toDataURL("image/jpeg", 0.72));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// ---------- ガチャ ----------
+const GACHA_COST = 30;
+const GACHA_COST_10 = 250;
+const SHARD_EXCHANGE = 15; // かけら 15こで すきな ものと こうかん
+
+// あたるのは「みため」だけ。つよさは ショップで かくじつに かえる
+const GACHA_ITEMS = [
+  // ぼうし
+  { id: "cap-straw", kind: "hat", name: "むぎわらぼうし", emoji: "👒", rarity: 1 },
+  { id: "cap-cap", kind: "hat", name: "キャップ", emoji: "🧢", rarity: 1 },
+  { id: "cap-party", kind: "hat", name: "パーティぼうし", emoji: "🎉", rarity: 1 },
+  { id: "cap-tk", kind: "hat", name: "シルクハット", emoji: "🎩", rarity: 2 },
+  { id: "cap-graduate", kind: "hat", name: "はかせぼうし", emoji: "🎓", rarity: 2 },
+  { id: "cap-crown", kind: "hat", name: "おうかん", emoji: "👑", rarity: 3 },
+  // かちどきエフェクト
+  { id: "fx-star", kind: "fx", name: "ほしの まい", emoji: "⭐", rarity: 1 },
+  { id: "fx-heart", kind: "fx", name: "ハートの まい", emoji: "💖", rarity: 1 },
+  { id: "fx-fire", kind: "fx", name: "ほのおの まい", emoji: "🔥", rarity: 2 },
+  { id: "fx-rainbow", kind: "fx", name: "にじの まい", emoji: "🌈", rarity: 3 },
+  // いろちがい
+  { id: "col-gold", kind: "color", name: "きんいろ", emoji: "🟡", rarity: 3, tint: "#F2CE3C" },
+  { id: "col-blue", kind: "color", name: "あおいろ", emoji: "🔵", rarity: 1, tint: "#6E9FE6" },
+  { id: "col-green", kind: "color", name: "みどりいろ", emoji: "🟢", rarity: 1, tint: "#2FA05A" },
+  { id: "col-purple", kind: "color", name: "むらさきいろ", emoji: "🟣", rarity: 2, tint: "#9B6BD9" },
+  // ずかんの はいけい
+  { id: "bg-night", kind: "bg", name: "よぞらの はいけい", emoji: "🌌", rarity: 2 },
+  { id: "bg-sea", kind: "bg", name: "うみの はいけい", emoji: "🌊", rarity: 2 },
+];
+
+const RARITY_WEIGHT = { 1: 60, 2: 30, 3: 10 };
+const RARITY_LABEL = { 1: "ノーマル", 2: "レア", 3: "スーパーレア" };
+const RARITY_COLOR = { 1: "#B8B3E0", 2: "#4AC9FF", 3: "#FFD23F" };
+
+function rollGacha() {
+  const total = GACHA_ITEMS.reduce((sum, it) => sum + RARITY_WEIGHT[it.rarity], 0);
+  let r = Math.random() * total;
+  for (const it of GACHA_ITEMS) {
+    r -= RARITY_WEIGHT[it.rarity];
+    if (r <= 0) return it;
+  }
+  return GACHA_ITEMS[0];
+}
+
+// きょうの ひづけ(デイリー無料の はんてい)
+function todayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
 // ---------- しょうごう(じっせき) ----------
 const ACHIEVEMENTS = [
   { id: "first-evo", emoji: "🐣", name: "はじめての しんか", desc: "1かい しんかする",
@@ -240,6 +321,31 @@ const ACHIEVEMENTS = [
     check: (r) => r.bestFloor >= 15 },
   { id: "shopper", emoji: "🛒", name: "そうび コンプリート", desc: "そうびを ぜんぶ そろえる",
     check: (r) => (r.owned?.length || 0) >= 11 },
+  { id: "g1", emoji: "1️⃣", name: "1年生 マスター", desc: "1年生の もんだいで 100もん せいかい",
+    check: (r) => (r.gradeCorrect?.[1] || 0) >= 100 },
+  { id: "g2", emoji: "2️⃣", name: "2年生 マスター", desc: "2年生の もんだいで 100もん せいかい",
+    check: (r) => (r.gradeCorrect?.[2] || 0) >= 100 },
+  { id: "g3", emoji: "3️⃣", name: "3年生 マスター", desc: "3年生の もんだいで 100もん せいかい",
+    check: (r) => (r.gradeCorrect?.[3] || 0) >= 100 },
+  { id: "g4", emoji: "4️⃣", name: "4年生 マスター", desc: "4年生の もんだいで 100もん せいかい",
+    check: (r) => (r.gradeCorrect?.[4] || 0) >= 100 },
+  { id: "g5", emoji: "5️⃣", name: "5年生 マスター", desc: "5年生の もんだいで 100もん せいかい",
+    check: (r) => (r.gradeCorrect?.[5] || 0) >= 100 },
+  { id: "g6", emoji: "6️⃣", name: "6年生 マスター", desc: "6年生の もんだいで 100もん せいかい",
+    check: (r) => (r.gradeCorrect?.[6] || 0) >= 100 },
+  { id: "allgrade", emoji: "🎖️", name: "ぜんがくねん せいは", desc: "1〜6年生 すべてで 100もん せいかい",
+    check: (r) => [1,2,3,4,5,6].every((g) => (r.gradeCorrect?.[g] || 0) >= 100) },
+  { id: "myfirst", emoji: "🎨", name: "はじめての じさくモンスター", desc: "じぶんの モンスターを 1たい とうろく",
+    check: (r) => (r.myMonsters?.length || 0) >= 1 },
+  { id: "my5", emoji: "🖼️", name: "モンスター ずかん", desc: "じぶんの モンスターを 5たい とうろく",
+    check: (r) => (r.myMonsters?.length || 0) >= 5 },
+  { id: "gacha10", emoji: "🎁", name: "ガチャ 10かい", desc: "ガチャを 10かい ひく",
+    check: (r) => (r.gachaCount || 0) >= 10 },
+  { id: "sr", emoji: "✨", name: "スーパーレア", desc: "スーパーレアを あてる",
+    check: (r) => (r.gachaOwned || []).some((id) => {
+      const it = GACHA_ITEMS.find((g) => g.id === id);
+      return it && it.rarity === 3;
+    }) },
 ];
 
 const SHOP_ITEMS = [
@@ -312,6 +418,43 @@ const MODE_GROUPS = [
   { id: "mul-pick", label: "だんを えらぶ", emoji: "🎯" },
   { id: "grade", label: "がくねんべつ", emoji: "🎒" },
 ];
+
+// むずかしい もんだいほど ポイントと けいけんちが ふえる
+const MODE_REWARD = {
+  addsub: 1.0,
+  "mul-random": 1.2,
+  "mul-pick": 1.1,
+  "grade-1": 1.0,
+  "grade-2": 1.2,
+  "grade-3": 1.4,
+  "grade-4": 1.6,
+  "grade-5": 1.8,
+  "grade-6": 2.0,
+};
+
+// むずかしい もんだいほど かんがえる じかんを ながくする
+const MODE_TIME = {
+  addsub: 1.0,
+  "mul-random": 1.0,
+  "mul-pick": 1.0,
+  "grade-1": 1.0,
+  "grade-2": 1.1,
+  "grade-3": 1.4,
+  "grade-4": 1.9,
+  "grade-5": 2.3,
+  "grade-6": 2.7,
+};
+
+function timeMultFor(mode) {
+  if (MODE_TIME[mode]) return MODE_TIME[mode];
+  return 1.0;
+}
+
+function rewardMult(mode) {
+  if (MODE_REWARD[mode]) return MODE_REWARD[mode];
+  if (mode && mode.startsWith("mul-")) return 1.15; // ◯のだん
+  return 1.0;
+}
 
 // 学年べつの 出題ないよう
 const GRADES = [
@@ -747,8 +890,8 @@ function enemyForStage(stageNumber) {
     const base = BOSSES[idx];
     return {
       ...base,
-      hp: base.hp + cycle * 24,
-      atk: base.atk + cycle * 3,
+      hp: Math.round(base.hp * (1 + cycle * 0.4)),
+      atk: base.atk + Math.round(cycle * 3.5),
       isBoss: true,
     };
   }
@@ -759,8 +902,8 @@ function enemyForStage(stageNumber) {
   const base = ENEMIES[idx];
   return {
     ...base,
-    hp: base.hp + cycle * 6,
-    atk: base.atk + cycle * 1,
+    hp: Math.round(base.hp * (1 + cycle * 0.35)),
+    atk: base.atk + Math.round(cycle * 1.6),
     isBoss: false,
   };
 }
@@ -1532,10 +1675,23 @@ function MathMonsterBattle() {
     maxStreak: 0,
     evolveCount: 0,
     tableCorrect: {},
+    gradeCorrect: {},
     seenBranches: [],
     reachedFinal: false,
   });
   const [confirmRebirth, setConfirmRebirth] = useState(false);
+  // じさく モンスター
+  const [myMonsters, setMyMonsters] = useState([]); // {id,name,image}
+  const [draftImage, setDraftImage] = useState(null);
+  const [draftName, setDraftName] = useState("");
+  const [imgBusy, setImgBusy] = useState(false);
+  // ガチャ
+  const [gachaOwned, setGachaOwned] = useState([]);
+  const [shards, setShards] = useState(0);
+  const [gachaCount, setGachaCount] = useState(0);
+  const [freeGachaDate, setFreeGachaDate] = useState(null);
+  const [gachaResult, setGachaResult] = useState(null); // [{item,isNew}]
+  const [equipped, setEquipped] = useState({ hat: null, fx: null, color: null });
   const [saveStatus, setSaveStatus] = useState("idle"); // 'idle'|'saving'|'saved'|'error'
   const [saveSupported, setSaveSupported] = useState(true);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -1568,6 +1724,9 @@ function MathMonsterBattle() {
   const stageStartPoints = useRef(0);
   const stageStartTime = useRef(Date.now());
   const recentResultsRef = useRef([]);
+  // 1もんあたりの ほうしゅうは ちいさいので、はんぱを つぎに もちこす
+  const pointFracRef = useRef(0);
+  const expFracRef = useRef(0);
 
   const statsBase = statsFor(owned, branch);
   const stats = {
@@ -1581,7 +1740,7 @@ function MathMonsterBattle() {
     const stageMult = towerMode
       ? stageTimeFactor(towerFloor * BOSS_INTERVAL, true)
       : stageTimeFactor(stageNumber, isBossStage(stageNumber));
-    return Math.round(base * branchMult * stageMult);
+    return Math.round(base * branchMult * stageMult * timeMultFor(mode));
   };
   const thresholdFor = (st) => Math.ceil(st.threshold * stats.thresholdMult);
 
@@ -1627,6 +1786,12 @@ function MathMonsterBattle() {
           if (data.rebirth) setRebirth(data.rebirth);
           if (data.bestFloor) setBestFloor(data.bestFloor);
           if (data.records) setRecords((r) => ({ ...r, ...data.records }));
+          if (data.myMonsters) setMyMonsters(data.myMonsters);
+          if (data.gachaOwned) setGachaOwned(data.gachaOwned);
+          if (typeof data.shards === "number") setShards(data.shards);
+          if (typeof data.gachaCount === "number") setGachaCount(data.gachaCount);
+          if (data.freeGachaDate) setFreeGachaDate(data.freeGachaDate);
+          if (data.equipped) setEquipped((eq) => ({ ...eq, ...data.equipped }));
           if (data.savedAt) setSavedAt(data.savedAt);
           setEnemyHp(data.enemyHp ?? enemyForStage(sn).hp);
           if (data.branch) setBranch(data.branch);
@@ -1643,9 +1808,16 @@ function MathMonsterBattle() {
           const built = buildProblemState(sn, diff, [], data.mode ?? "addsub", data.selectedTables ?? [2, 3, 4, 5]);
           setProblem(built.problem);
           setChoices(built.choices);
-          setTimeLimit(timeFor(built.timeLimit, data.branch ?? null));
+          const loadedMode = data.mode ?? "addsub";
+          const loadedLim = Math.round(
+            built.timeLimit *
+              ((BRANCH_BONUS[data.branch] && BRANCH_BONUS[data.branch].timeMult) || 1) *
+              stageTimeFactor(data.stageNumber ?? 1, isBossStage(data.stageNumber ?? 1)) *
+              timeMultFor(loadedMode)
+          );
+          setTimeLimit(loadedLim);
           setCurrentLevel(built.level);
-          remainingRef.current = timeFor(built.timeLimit, data.branch ?? null);
+          remainingRef.current = loadedLim;
         }
       } catch (e) {
         // 保存データなし、または初回起動
@@ -1681,6 +1853,12 @@ function MathMonsterBattle() {
             rebirth,
             bestFloor,
             records,
+            myMonsters,
+            gachaOwned,
+            shards,
+            gachaCount,
+            freeGachaDate,
+            equipped,
             savedAt: Date.now(),
           })
         );
@@ -1710,6 +1888,12 @@ function MathMonsterBattle() {
     rebirth,
     bestFloor,
     records,
+    myMonsters,
+    gachaOwned,
+    shards,
+    gachaCount,
+    freeGachaDate,
+    equipped,
   ]);
 
   // さいしょから やりなおす
@@ -1737,12 +1921,19 @@ function MathMonsterBattle() {
     setTowerMode(false);
     setTowerFloor(1);
     setTowerResult(null);
+    setMyMonsters([]);
+    setGachaOwned([]);
+    setShards(0);
+    setGachaCount(0);
+    setFreeGachaDate(null);
+    setEquipped({ hat: null, fx: null, color: null });
     setRecords({
       bossDefeated: 0,
       critCount: 0,
       maxStreak: 0,
       evolveCount: 0,
       tableCorrect: {},
+      gradeCorrect: {},
       seenBranches: [],
       reachedFinal: false,
     });
@@ -1837,8 +2028,13 @@ function MathMonsterBattle() {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
 
+  // いま たたかっている てきを かえす(タワーと つうじょうを ここで きりわけ)
+  function currentEnemy() {
+    return towerMode ? towerEnemy(towerFloor) : enemyForStage(stageNumber);
+  }
+
   function applyEnemyAttack() {
-    const enemy = enemyForStage(stageNumber);
+    const enemy = currentEnemy();
     const dmg = Math.max(1, enemy.atk - def);
     setFlashPlayer(true);
     setPlayerHp((hp) => Math.max(0, hp - dmg));
@@ -1856,7 +2052,10 @@ function MathMonsterBattle() {
     if (isCorrect) {
       const baseGain = 1 + Math.min(2, Math.floor(streak / 3)) + streakBonus;
       const raw = isCritical ? baseGain + 1 : baseGain;
-      const gained = Math.round(raw * stats.pointMult);
+      // はんぱを もちこして、ばいりつが きちんと きくようにする
+      const exact = raw * stats.pointMult * rewardMult(mode) + pointFracRef.current;
+      const gained = Math.floor(exact);
+      pointFracRef.current = exact - gained;
       const dmg = isCritical ? Math.round(atk * CRIT_MULTIPLIER) : atk;
 
       setFeedback({ type: isCritical ? "critical" : "correct" });
@@ -1869,8 +2068,21 @@ function MathMonsterBattle() {
       });
       setPoints((p) => p + gained);
       setCorrectCount((c) => c + 1);
-      setExp((e) => e + EXP_PER_CORRECT);
+      const exactExp = EXP_PER_CORRECT * rewardMult(mode) + expFracRef.current;
+      const gainedExp = Math.floor(exactExp);
+      expFracRef.current = exactExp - gainedExp;
+      if (gainedExp > 0) setExp((e) => e + gainedExp);
       if (isCritical) setRecords((r) => ({ ...r, critCount: r.critCount + 1 }));
+      // 学年べつの せいかいすう(しょうごうよう)
+      if (mode && mode.startsWith("grade-")) {
+        const g = parseInt(mode.split("-")[1], 10);
+        if (g >= 1 && g <= 6) {
+          setRecords((r) => ({
+            ...r,
+            gradeCorrect: { ...(r.gradeCorrect || {}), [g]: ((r.gradeCorrect || {})[g] || 0) + 1 },
+          }));
+        }
+      }
       // 九九は だんごとに かぞえる(しょうごうよう)
       if (problem.text && problem.text.includes("×")) {
         const a = parseInt(problem.text.split("×")[0].trim(), 10);
@@ -1912,11 +2124,14 @@ function MathMonsterBattle() {
   useEffect(() => {
     if (enemyHp === 0 && !stageClear) {
       const t = setTimeout(() => {
-        const beaten = enemyForStage(stageNumber);
+        const beaten = currentEnemy();
         const elapsed = Date.now() - stageStartTime.current;
         const bonus = timeBonusFor(elapsed, beaten.isBoss);
-        if (bonus > 0) setPoints((pt) => pt + bonus);
-        const gainedExp = beaten.isBoss ? EXP_PER_BOSS : EXP_PER_STAGE;
+        const bonusScaled = Math.round(bonus * rewardMult(mode));
+        if (bonusScaled > 0) setPoints((pt) => pt + bonusScaled);
+        const gainedExp = Math.round(
+          (beaten.isBoss ? EXP_PER_BOSS : EXP_PER_STAGE) * rewardMult(mode)
+        );
         setExp((e) => e + gainedExp);
         if (beaten.isBoss) {
           setRecords((r) => ({ ...r, bossDefeated: r.bossDefeated + 1 }));
@@ -1924,17 +2139,18 @@ function MathMonsterBattle() {
         setStageClear({
           defeatedName: beaten.name,
           wasBoss: beaten.isBoss,
-          expGained: beaten.isBoss ? EXP_PER_BOSS : EXP_PER_STAGE,
+          expGained: gainedExp,
           pointsEarned: points - stageStartPoints.current,
-          clearedStage: stageNumber,
+          clearedStage: towerMode ? towerFloor : stageNumber,
+          inTower: towerMode,
           elapsed,
-          timeBonus: bonus,
+          timeBonus: bonusScaled,
         });
       }, 900);
       return () => clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enemyHp]);
+  }, [enemyHp, towerMode, towerFloor, stageNumber]);
 
   function proceedToNextStage() {
     if (towerMode) {
@@ -2108,7 +2324,7 @@ function MathMonsterBattle() {
     setBag((b) => ({ ...b, [id]: b[id] - 1 }));
   }
 
-  const enemy = towerMode ? towerEnemy(towerFloor) : enemyForStage(stageNumber);
+  const enemy = currentEnemy();
   const enemyMaxHp = enemy.hp;
 
   if (!loaded) {
@@ -2122,11 +2338,14 @@ function MathMonsterBattle() {
     );
   }
 
-  function handleStart() {
+  // どの タブから はいっても もんだいと タイマーを しょきかする
+  function enterGame(startTab = "battle") {
     stageStartTime.current = Date.now();
     lastTickRef.current = Date.now();
     answeredRef.current = false;
     recentResultsRef.current = [];
+    pointFracRef.current = 0;
+    expFracRef.current = 0;
     const built = buildProblemState(stageNumber, difficulty, [], mode, selectedTables);
     setProblem(built.problem);
     setChoices(built.choices);
@@ -2134,10 +2353,103 @@ function MathMonsterBattle() {
     setCurrentLevel(built.level);
     setTimeLeftRatio(1);
     remainingRef.current = timeFor(built.timeLimit);
+    setHintedChoices(null);
+    setFeedback(null);
+    setTab(startTab);
     setScreen("game");
   }
 
+  function handleStart() {
+    enterGame("battle");
+  }
+
   const hasProgress = correctCount > 0 || points > 0;
+
+  // ---------- じさく モンスター ----------
+  const freeGachaAvailable = freeGachaDate !== todayKey();
+
+  async function handlePickImage(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    if (myMonsters.length >= MY_MONSTER_MAX) {
+      setItemToast(`とうろくは ${MY_MONSTER_MAX}たいまで`);
+      return;
+    }
+    setImgBusy(true);
+    try {
+      const data = await shrinkImage(file);
+      setDraftImage(data);
+      setDraftName("");
+    } catch (err) {
+      setItemToast("がぞうを よみこめませんでした");
+    } finally {
+      setImgBusy(false);
+    }
+  }
+
+  function saveMyMonster() {
+    if (!draftImage) return;
+    const name = (draftName || "").trim() || `オリジナル${myMonsters.length + 1}`;
+    setMyMonsters((list) => [
+      ...list,
+      { id: `my-${Date.now()}`, name: name.slice(0, 10), image: draftImage },
+    ]);
+    setDraftImage(null);
+    setDraftName("");
+    setItemToast("🎨 ずかんに とうろくした!");
+  }
+
+  function deleteMyMonster(id) {
+    setMyMonsters((list) => list.filter((m) => m.id !== id));
+  }
+
+  // ---------- ガチャ ----------
+  function applyGachaResults(items) {
+    const news = [];
+    let addShards = 0;
+    const owned = [...gachaOwned];
+    items.forEach((it) => {
+      if (owned.includes(it.id)) {
+        addShards += it.rarity * 2;
+        news.push({ item: it, isNew: false });
+      } else {
+        owned.push(it.id);
+        news.push({ item: it, isNew: true });
+      }
+    });
+    setGachaOwned(owned);
+    if (addShards > 0) setShards((v) => v + addShards);
+    setGachaCount((c) => c + items.length);
+    setGachaResult(news);
+  }
+
+  function drawGacha(times, free) {
+    const cost = free ? 0 : times === 10 ? GACHA_COST_10 : GACHA_COST * times;
+    if (!free && points < cost) {
+      setItemToast("ポイントが たりないよ");
+      return;
+    }
+    if (!free) setPoints((p) => p - cost);
+    if (free) setFreeGachaDate(todayKey());
+    const items = Array.from({ length: times }, () => rollGacha());
+    applyGachaResults(items);
+  }
+
+  function exchangeShards(item) {
+    if (shards < SHARD_EXCHANGE || gachaOwned.includes(item.id)) return;
+    setShards((v) => v - SHARD_EXCHANGE);
+    setGachaOwned((o) => [...o, item.id]);
+    setItemToast(`${item.emoji} ${item.name} と こうかんした!`);
+  }
+
+  function toggleEquip(item) {
+    if (!gachaOwned.includes(item.id)) return;
+    setEquipped((eq) => ({
+      ...eq,
+      [item.kind]: eq[item.kind] === item.id ? null : item.id,
+    }));
+  }
 
   // エンドレスタワーを はじめる
   function startTower() {
@@ -2154,7 +2466,7 @@ function MathMonsterBattle() {
     const built = buildProblemState(BOSS_INTERVAL, difficulty, [], mode, selectedTables);
     setProblem(built.problem);
     setChoices(built.choices);
-    const lim = Math.round(built.timeLimit * ((BRANCH_BONUS[branch] && BRANCH_BONUS[branch].timeMult) || 1) * stageTimeFactor(BOSS_INTERVAL, true));
+    const lim = Math.round(built.timeLimit * ((BRANCH_BONUS[branch] && BRANCH_BONUS[branch].timeMult) || 1) * stageTimeFactor(BOSS_INTERVAL, true) * timeMultFor(mode));
     setTimeLimit(lim);
     remainingRef.current = lim;
     setCurrentLevel(built.level);
@@ -2317,6 +2629,19 @@ function MathMonsterBattle() {
               <div style={styles.gradeDesc}>
                 {GRADES.find((g) => `grade-${g.g}` === mode)?.desc}
               </div>
+              <div style={styles.gradeRewardRow}>
+                {GRADES.map((g) => (
+                  <span
+                    key={g.g}
+                    style={{
+                      ...styles.gradeRewardCell,
+                      color: mode === `grade-${g.g}` ? "#FFD23F" : "#6F6A9C",
+                    }}
+                  >
+                    ×{MODE_REWARD[`grade-${g.g}`]}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
 
@@ -2384,7 +2709,10 @@ function MathMonsterBattle() {
               )}
             </div>
           )}
-          <div style={styles.difficultyDesc}>{modeLabel(mode, selectedTables)}</div>
+          <div style={styles.difficultyDesc}>
+            {modeLabel(mode, selectedTables)}
+            <span style={styles.rewardTag}>ポイント・けいけんち ×{rewardMult(mode)}</span>
+          </div>
           <div style={{ height: 10 }} />
 
           <div style={styles.difficultyLabel}>えのタイプ</div>
@@ -2432,11 +2760,28 @@ function MathMonsterBattle() {
             {hasProgress ? "つづきから ▶" : "はじめる ▶"}
           </button>
 
-          <div style={styles.startFooterRow}>
-            <span>⚔️ たたかう</span>
-            <span>📖 しんかさせる</span>
-            <span>🛒 そうびする</span>
-          </div>
+          {/* バトルに はいらずに ひらける */}
+          {hasProgress && (
+            <div style={styles.homeNavRow}>
+              {[
+                { id: "dex", label: "ずかん", emoji: "📖" },
+                { id: "shop", label: "ショップ", emoji: "🛒" },
+                { id: "gacha", label: "ガチャ", emoji: "🎁" },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => enterGame(t.id)}
+                  style={styles.homeNavBtn}
+                >
+                  <span style={{ fontSize: 19 }}>{t.emoji}</span>
+                  <span style={styles.homeNavLabel}>{t.label}</span>
+                  {t.id === "gacha" && freeGachaAvailable && (
+                    <span style={styles.freeDot}>むりょう</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* エンドレスタワー */}
           {towerUnlocked && (
@@ -2549,6 +2894,20 @@ function MathMonsterBattle() {
         @keyframes bossIdle { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-6px) scale(1.04)} }
         @keyframes bossPulse { 0%,100%{box-shadow:0 0 0 0 rgba(255,107,74,0.5)} 50%{box-shadow:0 0 0 8px rgba(255,107,74,0)} }
         .boss-idle { display:inline-block; animation: bossIdle 1.6s ease-in-out infinite; }
+        @keyframes idleBob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+        @keyframes atkLeft { 0%{transform:translateX(0)} 35%{transform:translateX(46px) scale(1.08)} 100%{transform:translateX(0)} }
+        @keyframes atkRight { 0%{transform:translateX(0)} 35%{transform:translateX(-46px) scale(1.08)} 100%{transform:translateX(0)} }
+        @keyframes hurtLeft { 0%{transform:translateX(0)} 20%{transform:translateX(-14px) rotate(-8deg); filter:brightness(2)} 60%{transform:translateX(4px)} 100%{transform:translateX(0)} }
+        @keyframes hurtRight { 0%{transform:translateX(0)} 20%{transform:translateX(14px) rotate(8deg); filter:brightness(2)} 60%{transform:translateX(-4px)} 100%{transform:translateX(0)} }
+        @keyframes koFall { 0%{transform:rotate(0) translateY(0); opacity:1} 100%{transform:rotate(78deg) translateY(26px); opacity:0.25} }
+        @keyframes impactPop { 0%{transform:translate(-50%,-50%) scale(0.3); opacity:0} 40%{transform:translate(-50%,-50%) scale(1.3); opacity:1} 100%{transform:translate(-50%,-50%) scale(1); opacity:0} }
+        .idle-bob { animation: idleBob 2.2s ease-in-out infinite; }
+        .atk-left { animation: atkLeft 0.55s cubic-bezier(.3,1.4,.4,1); }
+        .atk-right { animation: atkRight 0.55s cubic-bezier(.3,1.4,.4,1); }
+        .hurt-left { animation: hurtLeft 0.5s ease-out; }
+        .hurt-right { animation: hurtRight 0.5s ease-out; }
+        .ko-fall { animation: koFall 0.7s ease-in forwards; }
+        .impact { animation: impactPop 0.6s ease-out forwards; }
         .banner-pop { animation: bannerPop 0.4s ease-out; }
         .confetti { animation: confettiFall 1.6s ease-in forwards; }
         button { font-family: 'Nunito', sans-serif; }
@@ -2702,12 +3061,18 @@ function MathMonsterBattle() {
                   animationDelay: `${i * 0.06}s`,
                 }}
               >
-                {["✨", "🎉", "⭐"][i % 3]}
+                {equipped.fx
+                  ? GACHA_ITEMS.find((g) => g.id === equipped.fx)?.emoji
+                  : ["✨", "🎉", "⭐"][i % 3]}
               </span>
             ))}
           </div>
           <div style={styles.clearTitle}>
-            {stageClear.wasBoss ? "👑 ボス げきは!" : `ステージ ${stageClear.clearedStage} クリア!`}
+            {stageClear.inTower
+              ? `🗼 ${stageClear.clearedStage}かい とっぱ!`
+              : stageClear.wasBoss
+              ? "👑 ボス げきは!"
+              : `ステージ ${stageClear.clearedStage} クリア!`}
           </div>
           <div style={styles.clearSub}>{stageClear.defeatedName} を たおした!</div>
           <div style={styles.clearTimeRow}>
@@ -2748,102 +3113,127 @@ function MathMonsterBattle() {
             <span style={styles.levelBadge}>
               {mode === "addsub"
                 ? `${DIFFICULTIES.find((d) => d.id === difficulty)?.emoji} Lv.${currentLevel}`
-                : `✖️ ${modeLabel(mode, selectedTables)}`}
+                : `${modeLabel(mode, selectedTables)}`}
+              {rewardMult(mode) > 1 && (
+                <span style={styles.rewardBadge}>×{rewardMult(mode)}</span>
+              )}
             </span>
           </div>
-          {/* 敵 */}
-          <div
-            style={{
-              ...styles.enemyArea,
-              ...(enemy.isBoss ? styles.enemyAreaBoss : {}),
-            }}
-          >
-            <div style={styles.hpRow}>
-              <span style={{ ...styles.hpLabel, ...(enemy.isBoss ? styles.bossName : {}) }}>
-                {enemy.isBoss ? `👑 ${enemy.name}` : enemy.name}
-              </span>
-              <span style={styles.hpNumbers}>
-                {enemyHp} / {enemyMaxHp}
-              </span>
-            </div>
-            <div style={styles.hpBarTrack}>
-              <div
-                style={{
-                  ...styles.hpBarFill,
-                  width: `${(enemyHp / enemyMaxHp) * 100}%`,
-                  background: enemy.color,
-                }}
-              />
-            </div>
-            <div
-              className={
-                feedback?.type === "critical" ? "crit-anim" : flashEnemy ? "flash-anim" : ""
-              }
-              style={{
-                fontSize: enemy.isBoss ? 80 : 64,
-                textAlign: "center",
-                marginTop: 8,
-                position: "relative",
-              }}
-            >
-              <span className={enemy.isBoss && enemyHp > 0 ? "boss-idle" : ""}>
-                {enemyHp === 0 ? (
-                  <span style={{ fontSize: 60 }}>✨</span>
-                ) : (
-                  <EnemyFace enemy={enemy} size={enemy.isBoss ? 110 : 90} />
-                )}
-              </span>
-              {floatingText && (feedback?.type === "correct" || feedback?.type === "critical") && (
-                <div
-                  className={feedback?.type === "critical" ? "crit-burst float-pts" : "float-pts"}
-                  style={{
-                    ...styles.floatingDamage,
-                    color: feedback?.type === "critical" ? "#FFD23F" : "#FF6B4A",
-                    fontSize: 22,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {floatingText}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 自分のモンスター */}
-          <div style={styles.selfArea}>
-            <div style={styles.selfRow}>
-              <div
-                className={flashPlayer ? "shake-anim" : ""}
-                style={{ position: "relative" }}
-              >
-                <MonsterFace stage={stage} size={40} artStyle={artStyle} />
-                {floatingText && (feedback?.type === "wrong" || feedback?.type === "timeout") && (
-                  <div className="float-pts" style={{ ...styles.floatingDamage, color: "#FF6B4A" }}>
-                    {floatingText}
-                  </div>
-                )}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={styles.playerHpRow}>
-                  <span style={{ fontSize: 11, color: "#B8B3E0" }}>HP</span>
-                  <span style={{ fontSize: 11, color: "#B8B3E0" }}>
-                    {playerHp} / {maxHp}
-                  </span>
-                </div>
-                <div style={styles.hpBarTrackSmall}>
+          {/* たたかいの ばめん */}
+          <div style={{ ...styles.arena, ...(enemy.isBoss ? styles.arenaBoss : {}) }}>
+            {/* うえの HPバー(むかいあわせ) */}
+            <div style={styles.vsBar}>
+              <div style={styles.vsSide}>
+                <div style={styles.vsName}>{stage.name}</div>
+                <div style={styles.hpTrackL}>
                   <div
                     style={{
-                      ...styles.hpBarFill,
+                      ...styles.hpFillL,
                       width: `${(playerHp / maxHp) * 100}%`,
                       background: playerHp / maxHp > 0.3 ? "#7ED957" : "#FF6B4A",
                     }}
                   />
                 </div>
+                <div style={styles.hpNum}>{playerHp}</div>
+              </div>
+
+              <div style={styles.vsMark}>VS</div>
+
+              <div style={{ ...styles.vsSide, alignItems: "flex-end" }}>
+                <div style={{ ...styles.vsName, ...(enemy.isBoss ? styles.bossName : {}) }}>
+                  {enemy.isBoss ? `👑 ${enemy.name}` : enemy.name}
+                </div>
+                <div style={styles.hpTrackR}>
+                  <div
+                    style={{
+                      ...styles.hpFillR,
+                      width: `${(enemyHp / enemyMaxHp) * 100}%`,
+                      background: enemy.color,
+                    }}
+                  />
+                </div>
+                <div style={styles.hpNum}>{enemyHp}</div>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 10, fontSize: 12, color: "#C9C4F0", marginTop: 6 }}>
-              <span>⚔️ こうげき {atk}</span>
-              <span>🛡️ ぼうぎょ {def}</span>
+
+            {/* リング */}
+            <div style={styles.ring}>
+              <div style={styles.ground} />
+
+              {/* じぶんの キャラ(ひだり) */}
+              <div
+                className={
+                  feedback?.type === "correct" || feedback?.type === "critical"
+                    ? "atk-left"
+                    : feedback?.type === "wrong" || feedback?.type === "timeout"
+                    ? "hurt-left"
+                    : "idle-bob"
+                }
+                style={styles.fighterLeft}
+              >
+                <span style={{ position: "relative", display: "inline-flex" }}>
+                  <MonsterFace stage={stage} size={64} artStyle={artStyle} />
+                  {equipped.hat && (
+                    <span style={styles.hatOnFighter}>
+                      {GACHA_ITEMS.find((g) => g.id === equipped.hat)?.emoji}
+                    </span>
+                  )}
+                </span>
+                {floatingText && (feedback?.type === "wrong" || feedback?.type === "timeout") && (
+                  <div className="float-pts" style={{ ...styles.dmgNum, color: "#FF6B4A" }}>
+                    {floatingText}
+                  </div>
+                )}
+              </div>
+
+              {/* ぶつかったときの ひかり */}
+              {(feedback?.type === "correct" || feedback?.type === "critical") && enemyHp > 0 && (
+                <div
+                  className="impact"
+                  style={{
+                    ...styles.impact,
+                    fontSize: feedback?.type === "critical" ? 46 : 32,
+                  }}
+                >
+                  💥
+                </div>
+              )}
+
+              {/* てきの キャラ(みぎ) */}
+              <div
+                className={
+                  enemyHp === 0
+                    ? "ko-fall"
+                    : feedback?.type === "correct" || feedback?.type === "critical"
+                    ? "hurt-right"
+                    : feedback?.type === "wrong" || feedback?.type === "timeout"
+                    ? "atk-right"
+                    : enemy.isBoss
+                    ? "boss-idle"
+                    : "idle-bob"
+                }
+                style={styles.fighterRight}
+              >
+                <EnemyFace enemy={enemy} size={enemy.isBoss ? 86 : 72} />
+                {floatingText && (feedback?.type === "correct" || feedback?.type === "critical") && (
+                  <div
+                    className={feedback?.type === "critical" ? "crit-burst float-pts" : "float-pts"}
+                    style={{
+                      ...styles.dmgNum,
+                      color: feedback?.type === "critical" ? "#FFD23F" : "#FF6B4A",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {floatingText}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* じぶんの ステータス */}
+            <div style={styles.fighterStats}>
+              <span>⚔️ {atk}</span>
+              <span>🛡️ {def}</span>
               <span>🔥 れんぞく {streak}</span>
             </div>
           </div>
@@ -3118,10 +3508,61 @@ function MathMonsterBattle() {
             })}
           </div>
 
+          <div style={styles.shopGroupLabel}>
+            🎨 じぶんの モンスター({myMonsters.length}/{MY_MONSTER_MAX})
+          </div>
+          <div style={styles.myAddRow}>
+            <label style={styles.myAddBtn}>
+              {imgBusy ? "よみこみちゅう..." : "＋ しゃしんから ついか"}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handlePickImage}
+                style={{ display: "none" }}
+              />
+            </label>
+          </div>
+
+          {draftImage && (
+            <div style={styles.draftBox}>
+              <img src={draftImage} alt="" style={styles.draftImg} />
+              <input
+                type="text"
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                placeholder="なまえを つけよう"
+                maxLength={10}
+                style={styles.draftInput}
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={saveMyMonster} style={styles.draftSave}>
+                  とうろく
+                </button>
+                <button onClick={() => setDraftImage(null)} style={styles.resetNoBtn}>
+                  やめる
+                </button>
+              </div>
+            </div>
+          )}
+
+          {myMonsters.length > 0 && (
+            <div style={styles.myGrid}>
+              {myMonsters.map((m) => (
+                <div key={m.id} style={styles.myCard}>
+                  <img src={m.image} alt={m.name} style={styles.myImg} />
+                  <div style={styles.myName}>{m.name}</div>
+                  <button onClick={() => deleteMyMonster(m.id)} style={styles.myDelete}>
+                    けす
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div style={styles.shopGroupLabel}>🏅 しょうごう</div>
           <div style={styles.dexList}>
             {ACHIEVEMENTS.map((a) => {
-              const got = a.check({ ...records, correctCount, rebirth, bestFloor, owned });
+              const got = a.check({ ...records, correctCount, rebirth, bestFloor, owned, myMonsters, gachaCount, gachaOwned });
               return (
                 <div
                   key={a.id}
@@ -3167,12 +3608,119 @@ function MathMonsterBattle() {
         </div>
       )}
 
+      {tab === "gacha" && (
+        <div style={styles.shopScreen}>
+          <div style={styles.shopHeader}>ガチャ</div>
+          <div style={styles.shopPointsRow}>
+            もっている ポイント: 💰 {points} ・ かけら 💎 {shards}
+          </div>
+          <div style={styles.gachaNote}>
+            あたるのは みための アイテムだけ。つよさは かわらないよ
+          </div>
+
+          <div style={styles.gachaBtnRow}>
+            <button
+              onClick={() => drawGacha(1, true)}
+              disabled={!freeGachaAvailable}
+              style={{
+                ...styles.gachaBtn,
+                ...(freeGachaAvailable ? styles.gachaFree : styles.shopBtnDisabled),
+              }}
+            >
+              {freeGachaAvailable ? "🎁 きょうの むりょう 1かい" : "むりょうは また あした"}
+            </button>
+          </div>
+          <div style={styles.gachaBtnRow}>
+            <button
+              onClick={() => drawGacha(1, false)}
+              disabled={points < GACHA_COST}
+              style={{ ...styles.gachaBtn, ...(points < GACHA_COST ? styles.shopBtnDisabled : {}) }}
+            >
+              1かい 💰{GACHA_COST}
+            </button>
+            <button
+              onClick={() => drawGacha(10, false)}
+              disabled={points < GACHA_COST_10}
+              style={{ ...styles.gachaBtn, ...(points < GACHA_COST_10 ? styles.shopBtnDisabled : {}) }}
+            >
+              10かい 💰{GACHA_COST_10}
+            </button>
+          </div>
+
+          <div style={styles.shopGroupLabel}>
+            🎽 もっている アイテム({gachaOwned.length}/{GACHA_ITEMS.length})
+          </div>
+          <div style={styles.gachaGrid}>
+            {GACHA_ITEMS.map((it) => {
+              const has = gachaOwned.includes(it.id);
+              const on = equipped[it.kind] === it.id;
+              return (
+                <button
+                  key={it.id}
+                  onClick={() => (has ? toggleEquip(it) : exchangeShards(it))}
+                  disabled={!has && shards < SHARD_EXCHANGE}
+                  style={{
+                    ...styles.gachaCard,
+                    opacity: has ? 1 : 0.45,
+                    borderColor: on ? "#7ED957" : RARITY_COLOR[it.rarity],
+                  }}
+                >
+                  <div style={{ fontSize: 24 }}>{has ? it.emoji : "❔"}</div>
+                  <div style={styles.gachaName}>{has ? it.name : "？？？"}</div>
+                  <div style={{ ...styles.gachaRarity, color: RARITY_COLOR[it.rarity] }}>
+                    {RARITY_LABEL[it.rarity]}
+                  </div>
+                  {has ? (
+                    on && <div style={styles.equipTag}>そうびちゅう</div>
+                  ) : (
+                    <div style={styles.gachaExchange}>💎{SHARD_EXCHANGE}で こうかん</div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <div style={styles.gachaNote}>
+            おなじ ものが でたら かけらに かわるよ。かけら {SHARD_EXCHANGE}こで すきな ものと こうかんできる
+          </div>
+        </div>
+      )}
+
+      {/* ガチャの けっか */}
+      {gachaResult && (
+        <div style={styles.evoOverlay}>
+          <div style={styles.evoCaption}>ガチャの けっか</div>
+          <div style={styles.gachaResultGrid}>
+            {gachaResult.map((r, i) => (
+              <div
+                key={i}
+                className="pop"
+                style={{
+                  ...styles.gachaResultCard,
+                  borderColor: RARITY_COLOR[r.item.rarity],
+                }}
+              >
+                <div style={{ fontSize: 26 }}>{r.item.emoji}</div>
+                <div style={styles.gachaName}>{r.item.name}</div>
+                <div style={{ ...styles.gachaRarity, color: RARITY_COLOR[r.item.rarity] }}>
+                  {RARITY_LABEL[r.item.rarity]}
+                </div>
+                <div style={styles.newOrShard}>{r.isNew ? "NEW!" : `💎+${r.item.rarity * 2}`}</div>
+              </div>
+            ))}
+          </div>
+          <button onClick={() => setGachaResult(null)} style={styles.evoBtn}>
+            とじる
+          </button>
+        </div>
+      )}
+
       {/* タブナビ */}
       <div style={styles.tabBar}>
         {[
           { id: "battle", label: "バトル", emoji: "⚔️" },
           { id: "dex", label: "ずかん", emoji: "📖" },
           { id: "shop", label: "ショップ", emoji: "🛒" },
+          { id: "gacha", label: "ガチャ", emoji: "🎁" },
         ].map((t) => (
           <button
             key={t.id}
@@ -3338,13 +3886,6 @@ const styles = {
     cursor: "pointer",
     boxShadow: "0 6px 0 #B8791F, 0 10px 18px rgba(0,0,0,0.35)",
   },
-  startFooterRow: {
-    display: "flex",
-    gap: 18,
-    marginTop: 24,
-    fontSize: 12,
-    color: "#8A85B8",
-  },
   tablePickBox: {
     display: "flex",
     flexDirection: "column",
@@ -3356,6 +3897,32 @@ const styles = {
     display: "grid",
     gridTemplateColumns: "repeat(6, 1fr)",
     gap: 4,
+  },
+  rewardTag: {
+    marginLeft: 6,
+    color: "#FFD23F",
+    fontWeight: 700,
+  },
+  rewardBadge: {
+    marginLeft: 5,
+    background: "#FFD23F",
+    color: "#3A2400",
+    borderRadius: 7,
+    padding: "0 5px",
+    fontSize: 10,
+    fontWeight: 800,
+  },
+  gradeRewardRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(6, 1fr)",
+    gap: 4,
+    width: "100%",
+    maxWidth: 268,
+  },
+  gradeRewardCell: {
+    fontSize: 9,
+    textAlign: "center",
+    fontWeight: 700,
   },
   gradeDesc: {
     fontSize: 11,
@@ -3694,10 +4261,132 @@ const styles = {
     padding: "20px 40px",
     textAlign: "center",
   },
-  enemyAreaBoss: {
+  arena: {
+    background: "linear-gradient(180deg, #2A2654 0%, #1E1C42 62%, #14122E 100%)",
+    borderRadius: 18,
+    padding: "10px 12px 8px",
+    border: "1px solid #362F66",
+  },
+  arenaBoss: {
     border: "2px solid #FF6B4A",
-    background: "linear-gradient(180deg, #3A2038 0%, #26204A 100%)",
-    animation: "bossPulse 2.2s ease-in-out infinite",
+    background: "linear-gradient(180deg, #3A2038 0%, #26204A 62%, #180F2E 100%)",
+  },
+  vsBar: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  vsSide: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    gap: 3,
+  },
+  vsName: {
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 700,
+    fontSize: 12,
+    color: "#F5F3FF",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    maxWidth: 130,
+  },
+  vsMark: {
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 13,
+    color: "#FFD23F",
+    marginTop: 12,
+  },
+  hpTrackL: {
+    height: 11,
+    background: "#3A3568",
+    borderRadius: 6,
+    overflow: "hidden",
+    border: "1px solid #4A4580",
+  },
+  hpFillL: {
+    height: "100%",
+    transition: "width 0.45s ease",
+  },
+  hpTrackR: {
+    height: 11,
+    width: "100%",
+    background: "#3A3568",
+    borderRadius: 6,
+    overflow: "hidden",
+    border: "1px solid #4A4580",
+    display: "flex",
+    justifyContent: "flex-end",
+  },
+  hpFillR: {
+    height: "100%",
+    transition: "width 0.45s ease",
+  },
+  hpNum: {
+    fontSize: 10,
+    color: "#B8B3E0",
+  },
+  ring: {
+    position: "relative",
+    height: 118,
+    marginTop: 6,
+  },
+  ground: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 10,
+    height: 3,
+    background: "linear-gradient(90deg, transparent, #4A4580 20%, #4A4580 80%, transparent)",
+    borderRadius: 2,
+  },
+  fighterLeft: {
+    position: "absolute",
+    left: 6,
+    bottom: 12,
+    display: "inline-flex",
+    alignItems: "flex-end",
+  },
+  fighterRight: {
+    position: "absolute",
+    right: 6,
+    bottom: 12,
+    display: "inline-flex",
+    alignItems: "flex-end",
+  },
+  impact: {
+    position: "absolute",
+    left: "58%",
+    top: "45%",
+    transform: "translate(-50%,-50%)",
+    pointerEvents: "none",
+  },
+  dmgNum: {
+    position: "absolute",
+    top: -14,
+    left: "50%",
+    transform: "translateX(-50%)",
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 17,
+  },
+  hatOnFighter: {
+    position: "absolute",
+    top: -16,
+    left: "50%",
+    transform: "translateX(-50%)",
+    fontSize: 22,
+    pointerEvents: "none",
+  },
+  fighterStats: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 14,
+    fontSize: 11,
+    color: "#C9C4F0",
+    marginTop: 2,
   },
   bossName: {
     color: "#FFB199",
@@ -3725,6 +4414,40 @@ const styles = {
     color: "#2B0A00",
     borderRadius: 8,
     padding: "1px 7px",
+  },
+  homeNavRow: {
+    display: "flex",
+    gap: 10,
+    marginTop: 16,
+  },
+  homeNavBtn: {
+    position: "relative",
+    background: "#22204A",
+    border: "1px solid #4A4580",
+    borderRadius: 14,
+    padding: "10px 16px",
+    color: "#F5F3FF",
+    cursor: "pointer",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 2,
+    minWidth: 74,
+  },
+  homeNavLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+  },
+  freeDot: {
+    position: "absolute",
+    top: -7,
+    right: -6,
+    background: "#FFD23F",
+    color: "#3A2400",
+    borderRadius: 8,
+    padding: "1px 6px",
+    fontSize: 9,
+    fontWeight: 800,
   },
   towerBox: {
     marginTop: 14,
@@ -3781,6 +4504,183 @@ const styles = {
     fontSize: 10,
     fontWeight: 800,
   },
+  gachaNote: {
+    fontSize: 11,
+    color: "#8A85B8",
+    textAlign: "center",
+    lineHeight: 1.6,
+    margin: "8px 0",
+  },
+  gachaBtnRow: {
+    display: "flex",
+    gap: 10,
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  gachaBtn: {
+    flex: 1,
+    background: "linear-gradient(180deg, #7B52C4 0%, #5B3A9E 100%)",
+    color: "#F5F3FF",
+    border: "none",
+    borderRadius: 16,
+    padding: "12px 8px",
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 14,
+    cursor: "pointer",
+    boxShadow: "0 4px 0 #3E2870",
+  },
+  gachaFree: {
+    background: "linear-gradient(180deg, #FFD23F 0%, #FFB23F 100%)",
+    color: "#3A2400",
+    boxShadow: "0 4px 0 #B8791F",
+  },
+  gachaGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr 1fr",
+    gap: 8,
+  },
+  gachaCard: {
+    background: "#22204A",
+    border: "2px solid #362F66",
+    borderRadius: 12,
+    padding: "10px 4px",
+    textAlign: "center",
+    cursor: "pointer",
+    color: "#F5F3FF",
+  },
+  gachaName: {
+    fontSize: 10.5,
+    fontWeight: 700,
+    marginTop: 3,
+    lineHeight: 1.3,
+  },
+  gachaRarity: {
+    fontSize: 9,
+    marginTop: 2,
+  },
+  gachaExchange: {
+    fontSize: 8.5,
+    color: "#8A85B8",
+    marginTop: 3,
+  },
+  equipTag: {
+    fontSize: 9,
+    color: "#7ED957",
+    fontWeight: 800,
+    marginTop: 3,
+  },
+  gachaResultGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(72px, 1fr))",
+    gap: 8,
+    maxWidth: 320,
+    maxHeight: "50vh",
+    overflowY: "auto",
+    padding: 4,
+  },
+  gachaResultCard: {
+    background: "#22204A",
+    border: "2px solid #4A4580",
+    borderRadius: 12,
+    padding: "8px 4px",
+    textAlign: "center",
+  },
+  newOrShard: {
+    fontSize: 9,
+    fontWeight: 800,
+    color: "#FFD23F",
+    marginTop: 3,
+  },
+  myAddRow: {
+    display: "flex",
+    justifyContent: "center",
+    marginBottom: 10,
+  },
+  myAddBtn: {
+    background: "#3A3568",
+    border: "1px dashed #8A85B8",
+    borderRadius: 14,
+    padding: "10px 18px",
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#F5F3FF",
+    cursor: "pointer",
+  },
+  draftBox: {
+    background: "#22204A",
+    border: "2px solid #FFD23F",
+    borderRadius: 14,
+    padding: 12,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 12,
+  },
+  draftImg: {
+    width: 110,
+    height: 110,
+    borderRadius: 12,
+    objectFit: "cover",
+    border: "2px solid #4A4580",
+  },
+  draftInput: {
+    background: "#1E1C42",
+    border: "1px solid #4A4580",
+    borderRadius: 10,
+    padding: "8px 12px",
+    color: "#F5F3FF",
+    fontSize: 14,
+    textAlign: "center",
+    width: "70%",
+    WebkitUserSelect: "text",
+    userSelect: "text",
+  },
+  draftSave: {
+    background: "#FFD23F",
+    color: "#3A2400",
+    border: "none",
+    borderRadius: 12,
+    padding: "8px 20px",
+    fontWeight: 800,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  myGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr 1fr",
+    gap: 8,
+    marginBottom: 6,
+  },
+  myCard: {
+    background: "#22204A",
+    border: "1px solid #362F66",
+    borderRadius: 12,
+    padding: 6,
+    textAlign: "center",
+  },
+  myImg: {
+    width: "100%",
+    aspectRatio: "1 / 1",
+    borderRadius: 8,
+    objectFit: "cover",
+    display: "block",
+  },
+  myName: {
+    fontSize: 10.5,
+    fontWeight: 700,
+    marginTop: 4,
+    color: "#F5F3FF",
+  },
+  myDelete: {
+    marginTop: 4,
+    background: "transparent",
+    border: "none",
+    color: "#8A85B8",
+    fontSize: 10,
+    cursor: "pointer",
+  },
   gotTag: {
     fontSize: 10,
     fontWeight: 800,
@@ -3804,61 +4704,6 @@ const styles = {
     border: "1px solid rgba(255,107,74,0.4)",
     borderRadius: 10,
     padding: "5px 10px",
-  },
-  enemyArea: {
-    background: "#22204A",
-    borderRadius: 18,
-    padding: 16,
-    border: "1px solid #362F66",
-  },
-  hpRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    fontSize: 13,
-    marginBottom: 6,
-  },
-  hpLabel: { fontFamily: "'Baloo 2', sans-serif", fontWeight: 700 },
-  hpNumbers: { color: "#B8B3E0" },
-  hpBarTrack: {
-    height: 12,
-    background: "#3A3568",
-    borderRadius: 8,
-    overflow: "hidden",
-  },
-  hpBarTrackSmall: {
-    height: 8,
-    background: "#3A3568",
-    borderRadius: 6,
-    overflow: "hidden",
-    marginTop: 2,
-  },
-  hpBarFill: {
-    height: "100%",
-    transition: "width 0.5s ease",
-  },
-  floatingDamage: {
-    position: "absolute",
-    top: -10,
-    left: "50%",
-    transform: "translateX(-50%)",
-    fontFamily: "'Baloo 2', sans-serif",
-    fontWeight: 800,
-    fontSize: 18,
-  },
-  selfArea: {
-    background: "#1E1C42",
-    borderRadius: 14,
-    padding: "10px 12px",
-    border: "1px solid #302B5C",
-  },
-  selfRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-  },
-  playerHpRow: {
-    display: "flex",
-    justifyContent: "space-between",
   },
   timerTrack: {
     position: "relative",
