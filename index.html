@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20260822-121803";
+var APP_VERSION = "20260822-200414";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -411,6 +411,10 @@ const ACHIEVEMENTS = [
     check: (r) => (r.gradeCorrect?.[6] || 0) >= 100 },
   { id: "allgrade", emoji: "🎖️", name: "ぜんがくねん せいは", desc: "1〜6年生 すべてで 100もん せいかい",
     check: (r) => [1,2,3,4,5,6].every((g) => (r.gradeCorrect?.[g] || 0) >= 100) },
+  { id: "social50", emoji: "🗾", name: "とどうふけん はかせ", desc: "しゃかいで 50もん せいかい",
+    check: (r) => (r.socialCorrect || 0) >= 50 },
+  { id: "social200", emoji: "🏯", name: "にっぽん まるわかり", desc: "しゃかいで 200もん せいかい",
+    check: (r) => (r.socialCorrect || 0) >= 200 },
   { id: "myfirst", emoji: "🎨", name: "はじめての じさくモンスター", desc: "じぶんの モンスターを 1たい とうろく",
     check: (r) => (r.myMonsters?.length || 0) >= 1 },
   { id: "my5", emoji: "🖼️", name: "モンスター ずかん", desc: "じぶんの モンスターを 5たい とうろく",
@@ -488,6 +492,20 @@ const DIFFICULTIES = [
 const STAGES_PER_LEVEL = { easy: 4, normal: 3, hard: 2 };
 
 // 出題モード
+// きょうか
+const SUBJECTS = [
+  { id: "math", label: "さんすう", emoji: "🔢" },
+  { id: "social", label: "しゃかい", emoji: "🗾" },
+];
+
+// しゃかいの もんだいの しゅるい
+const SOCIAL_MODES = [
+  { id: "social-capital", label: "けんちょうしょざいち", emoji: "🏛️", desc: "けんめい → しょざいち" },
+  { id: "social-pref", label: "けんめい", emoji: "📍", desc: "しょざいち → けんめい" },
+  { id: "social-region", label: "ちほう", emoji: "🧭", desc: "けん → ちほう" },
+  { id: "social-mix", label: "ぜんぶ", emoji: "🎲", desc: "3しゅるいから ランダム" },
+];
+
 const MODE_GROUPS = [
   { id: "addsub", label: "たしざん・ひきざん", emoji: "➕" },
   { id: "mul-random", label: "九九ぜんぶ", emoji: "✖️" },
@@ -506,6 +524,10 @@ const MODE_REWARD = {
   "grade-4": 1.6,
   "grade-5": 1.8,
   "grade-6": 2.0,
+  "social-capital": 1.5,
+  "social-pref": 1.5,
+  "social-region": 1.2,
+  "social-mix": 1.6,
 };
 
 // むずかしい もんだいほど かんがえる じかんを ながくする
@@ -519,6 +541,10 @@ const MODE_TIME = {
   "grade-4": 1.9,
   "grade-5": 2.3,
   "grade-6": 2.7,
+  "social-capital": 1.6,
+  "social-pref": 1.6,
+  "social-region": 1.3,
+  "social-mix": 1.6,
 };
 
 function timeMultFor(mode) {
@@ -543,6 +569,10 @@ const GRADES = [
 ];
 
 function modeLabel(mode, selectedTables) {
+  if (mode && mode.startsWith("social-")) {
+    const m = SOCIAL_MODES.find((x) => x.id === mode);
+    return m ? m.label : "しゃかい";
+  }
   if (mode && mode.startsWith("grade-")) {
     const g = parseInt(mode.split("-")[1], 10);
     return `${g}年生`;
@@ -579,6 +609,67 @@ function computeLevel(stageNumber, difficulty, recentResults) {
 
 function getTimeLimit(level) {
   return level === 1 ? 9000 : level === 2 ? 7500 : 6500;
+}
+
+// ---------- しゃかい: 47とどうふけん ----------
+// [けんめい, けんちょうしょざいち, ちほう]
+const PREFS = [
+  ["北海道", "札幌市", "北海道"],
+  ["青森県", "青森市", "東北"], ["岩手県", "盛岡市", "東北"], ["宮城県", "仙台市", "東北"],
+  ["秋田県", "秋田市", "東北"], ["山形県", "山形市", "東北"], ["福島県", "福島市", "東北"],
+  ["茨城県", "水戸市", "関東"], ["栃木県", "宇都宮市", "関東"], ["群馬県", "前橋市", "関東"],
+  ["埼玉県", "さいたま市", "関東"], ["千葉県", "千葉市", "関東"], ["東京都", "東京", "関東"],
+  ["神奈川県", "横浜市", "関東"],
+  ["新潟県", "新潟市", "中部"], ["富山県", "富山市", "中部"], ["石川県", "金沢市", "中部"],
+  ["福井県", "福井市", "中部"], ["山梨県", "甲府市", "中部"], ["長野県", "長野市", "中部"],
+  ["岐阜県", "岐阜市", "中部"], ["静岡県", "静岡市", "中部"], ["愛知県", "名古屋市", "中部"],
+  ["三重県", "津市", "近畿"], ["滋賀県", "大津市", "近畿"], ["京都府", "京都市", "近畿"],
+  ["大阪府", "大阪市", "近畿"], ["兵庫県", "神戸市", "近畿"], ["奈良県", "奈良市", "近畿"],
+  ["和歌山県", "和歌山市", "近畿"],
+  ["鳥取県", "鳥取市", "中国"], ["島根県", "松江市", "中国"], ["岡山県", "岡山市", "中国"],
+  ["広島県", "広島市", "中国"], ["山口県", "山口市", "中国"],
+  ["徳島県", "徳島市", "四国"], ["香川県", "高松市", "四国"], ["愛媛県", "松山市", "四国"],
+  ["高知県", "高知市", "四国"],
+  ["福岡県", "福岡市", "九州"], ["佐賀県", "佐賀市", "九州"], ["長崎県", "長崎市", "九州"],
+  ["熊本県", "熊本市", "九州"], ["大分県", "大分市", "九州"], ["宮崎県", "宮崎市", "九州"],
+  ["鹿児島県", "鹿児島市", "九州"], ["沖縄県", "那覇市", "九州"],
+];
+
+const REGIONS = ["北海道", "東北", "関東", "中部", "近畿", "中国", "四国", "九州"];
+
+// しゃかいの もんだいを つくる
+// kind: 'capital'(けんちょうしょざいち) / 'pref'(けんめい) / 'region'(ちほう) / 'mix'
+function makeSocialProblem(kind) {
+  const k = kind === "mix" ? pick(["capital", "pref", "region"]) : kind;
+  const [name, capital, region] = pick(PREFS);
+
+  if (k === "capital") {
+    // おなじ ちほうの べつの けんの しょざいちを まぎらわしい こたえに する
+    const same = PREFS.filter((p) => p[2] === region && p[0] !== name).map((p) => p[1]);
+    const other = PREFS.filter((p) => p[2] !== region).map((p) => p[1]);
+    return {
+      text: `${name}の けんちょうしょざいちは?`,
+      answer: capital,
+      distractors: [...same, ...other].sort(() => Math.random() - 0.5).slice(0, 6),
+    };
+  }
+
+  if (k === "pref") {
+    const same = PREFS.filter((p) => p[2] === region && p[0] !== name).map((p) => p[0]);
+    const other = PREFS.filter((p) => p[2] !== region).map((p) => p[0]);
+    return {
+      text: `${capital}は どこの けん?`,
+      answer: name,
+      distractors: [...same, ...other].sort(() => Math.random() - 0.5).slice(0, 6),
+    };
+  }
+
+  // ちほう
+  return {
+    text: `${name}は どの ちほう?`,
+    answer: region,
+    distractors: REGIONS.filter((r) => r !== region).sort(() => Math.random() - 0.5),
+  };
 }
 
 // ---------- 学年別の 問題づくり ----------
@@ -845,6 +936,13 @@ function makeGradeProblem(grade) {
 }
 
 function makeProblem(level, mode, selectedTables) {
+  // しゃかい(とどうふけん)
+  if (mode && mode.startsWith("social-")) {
+    const kind = mode.split("-")[1];
+    const sp = makeSocialProblem(kind);
+    return { text: sp.text, answer: sp.answer, distractors: sp.distractors, kind: "social" };
+  }
+
   // 学年モード
   if (mode && mode.startsWith("grade-")) {
     const g = parseInt(mode.split("-")[1], 10) || 1;
@@ -1790,11 +1888,14 @@ function MathMonsterBattle() {
     gradeWrong: {},
     daily: {}, // { "2026-8-22": { correct: 12, wrong: 3 } }
     totalWrong: 0,
+    socialCorrect: 0,
+    socialWrong: 0,
     seenBranches: [],
     reachedFinal: false,
   });
   const [confirmRebirth, setConfirmRebirth] = useState(false);
   const [dashOpen, setDashOpen] = useState(false);
+  const [restoreBusy, setRestoreBusy] = useState(false);
   // じさく モンスター
   const [myMonsters, setMyMonsters] = useState([]); // {id,name,image}
   const [draftImage, setDraftImage] = useState(null);
@@ -2072,6 +2173,8 @@ function MathMonsterBattle() {
       gradeWrong: {},
       daily: {},
       totalWrong: 0,
+      socialCorrect: 0,
+      socialWrong: 0,
       seenBranches: [],
       reachedFinal: false,
     });
@@ -2215,6 +2318,11 @@ function MathMonsterBattle() {
           const key = correct ? "gradeCorrect" : "gradeWrong";
           next[key] = { ...(r[key] || {}), [g]: ((r[key] || {})[g] || 0) + 1 };
         }
+      }
+      // しゃかい
+      if (curMode && curMode.startsWith("social-")) {
+        const key = correct ? "socialCorrect" : "socialWrong";
+        next[key] = (r[key] || 0) + 1;
       }
       // 九九の だんごと
       if (prob && prob.text && prob.text.includes("×")) {
@@ -2629,6 +2737,64 @@ function MathMonsterBattle() {
   }
 
 
+  // ---------- セーブデータの ほぞんと ふくげん ----------
+  // いまの データを まとめて ファイルに おとす
+  function exportSave() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        setItemToast("まだ きろくが ありません");
+        return;
+      }
+      const stamp = new Date();
+      const name =
+        "keisan-monster-" +
+        stamp.getFullYear() +
+        String(stamp.getMonth() + 1).padStart(2, "0") +
+        String(stamp.getDate()).padStart(2, "0") +
+        "-" +
+        String(stamp.getHours()).padStart(2, "0") +
+        String(stamp.getMinutes()).padStart(2, "0") +
+        ".json";
+
+      const blob = new Blob([raw], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setItemToast("💾 ほぞんファイルを つくりました");
+    } catch (e) {
+      setItemToast("ほぞんに しっぱいしました");
+    }
+  }
+
+  // ファイルから もどす
+  async function importSave(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setRestoreBusy(true);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      // さいていげんの かたちが あっているか みる
+      if (typeof data !== "object" || data === null) {
+        throw new Error("形式が ちがいます");
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      setItemToast("✅ ふくげんしました。よみなおします");
+      setTimeout(() => location.reload(), 900);
+    } catch (err) {
+      setItemToast("そのファイルは よみこめません");
+    } finally {
+      setRestoreBusy(false);
+    }
+  }
+
   // ---------- おえかき ----------
   function openDraw() {
     setDrawOpen(true);
@@ -2985,6 +3151,24 @@ function MathMonsterBattle() {
                 })}
               </div>
 
+              {/* しゃかい */}
+              <div style={styles.dashSection}>しゃかい(とどうふけん)</div>
+              {(() => {
+                const c = records.socialCorrect || 0;
+                const w = records.socialWrong || 0;
+                const p = pct(c, w);
+                return (
+                  <div style={{ ...styles.statCell, borderColor: rateColor(p), padding: "12px 8px" }}>
+                    <div style={{ ...styles.statRate, color: rateColor(p), fontSize: 22 }}>
+                      {p === null ? "—" : `${p}%`}
+                    </div>
+                    <div style={styles.statSub}>
+                      {c + w > 0 ? `${c + w}もん(せいかい ${c})` : "まだ ちょうせんしていません"}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* いまの ようす */}
               <div style={styles.dashSection}>いまの ようす</div>
               <div style={styles.dashList}>
@@ -3017,6 +3201,30 @@ function MathMonsterBattle() {
 
               <div style={styles.dashNote}>
                 せいとうりつは この きのうを いれた あとの ぶんだけ かぞえています
+              </div>
+
+              {/* バックアップ */}
+              <div style={styles.dashSection}>データの バックアップ</div>
+              <div style={styles.backupBox}>
+                <button onClick={exportSave} style={styles.backupBtn}>
+                  💾 ファイルに ほぞん
+                </button>
+                <label style={styles.backupBtnOutline}>
+                  {restoreBusy ? "よみこみちゅう..." : "📂 ファイルから もどす"}
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={importSave}
+                    style={{ display: "none" }}
+                  />
+                </label>
+              </div>
+              <div style={styles.dashNote}>
+                きろくは この ブラウザの なかだけに あります。
+                サイトデータを けしたり、きしゅへんこう すると なくなります。
+                ときどき ファイルに ほぞんしておくと あんしんです。
+                <br />
+                ※ もどすと いまの きろくは うわがきされます
               </div>
             </div>
           </div>
@@ -3071,7 +3279,60 @@ function MathMonsterBattle() {
             <div style={styles.startStatusSub}>けいさんに こたえて モンスターを そだてよう!</div>
           )}
 
+          {/* きょうか */}
+          <div style={styles.difficultyLabel}>きょうか</div>
+          <div style={styles.difficultyRow}>
+            {SUBJECTS.map((sub) => {
+              const active =
+                sub.id === "social" ? mode.startsWith("social-") : !mode.startsWith("social-");
+              return (
+                <button
+                  key={sub.id}
+                  onClick={() => setMode(sub.id === "social" ? "social-mix" : "addsub")}
+                  style={{
+                    ...styles.difficultyBtn,
+                    ...(active ? styles.difficultyBtnActive : {}),
+                    minWidth: 92,
+                  }}
+                >
+                  <div style={{ fontSize: 20 }}>{sub.emoji}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>{sub.label}</div>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ height: 12 }} />
+
+          {/* しゃかいの もんだい */}
+          {mode.startsWith("social-") && (
+            <>
+              <div style={styles.difficultyLabel}>とどうふけん</div>
+              <div style={styles.socialRow}>
+                {SOCIAL_MODES.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setMode(m.id)}
+                    style={{
+                      ...styles.socialBtn,
+                      ...(mode === m.id ? styles.difficultyBtnActive : {}),
+                    }}
+                  >
+                    <span style={{ fontSize: 15 }}>{m.emoji}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700 }}>{m.label}</span>
+                  </button>
+                ))}
+              </div>
+              <div style={styles.difficultyDesc}>
+                {SOCIAL_MODES.find((m) => m.id === mode)?.desc}
+                <span style={styles.rewardTag}>ポイント・けいけんち ×{rewardMult(mode)}</span>
+              </div>
+              <div style={{ height: 10 }} />
+            </>
+          )}
+
           {/* もんだいの しゅるい */}
+          {!mode.startsWith("social-") && (
+          <>
           <div style={styles.difficultyLabel}>もんだい</div>
           <div style={styles.difficultyRow}>
             {MODE_GROUPS.map((m) => {
@@ -3202,6 +3463,9 @@ function MathMonsterBattle() {
             <span style={styles.rewardTag}>ポイント・けいけんち ×{rewardMult(mode)}</span>
           </div>
           <div style={{ height: 10 }} />
+
+          </>
+          )}
 
           <div style={styles.difficultyLabel}>えのタイプ</div>
           <div style={styles.difficultyRow}>
@@ -4376,7 +4640,7 @@ const styles = {
     flexDirection: "column",
     fontFamily: "'Nunito', sans-serif",
     color: "#F5F3FF",
-    maxWidth: 480,
+    maxWidth: 720,
     margin: "0 auto",
   },
   loadingScreen: {
@@ -4407,7 +4671,7 @@ const styles = {
     flexDirection: "column",
     fontFamily: "'Nunito', sans-serif",
     color: "#F5F3FF",
-    maxWidth: 480,
+    maxWidth: 720,
     margin: "0 auto",
   },
   starField: {
@@ -4524,6 +4788,24 @@ const styles = {
     display: "grid",
     gridTemplateColumns: "repeat(6, 1fr)",
     gap: 4,
+  },
+  socialRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 7,
+    maxWidth: 280,
+  },
+  socialBtn: {
+    background: "#22204A",
+    border: "2px solid #362F66",
+    borderRadius: 12,
+    padding: "8px 10px",
+    color: "#B8B3E0",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
   },
   rewardTag: {
     marginLeft: 6,
@@ -4959,6 +5241,9 @@ const styles = {
     position: "relative",
     height: 118,
     marginTop: 6,
+    maxWidth: 460,
+    marginLeft: "auto",
+    marginRight: "auto",
   },
   ground: {
     position: "absolute",
@@ -5164,7 +5449,7 @@ const styles = {
   },
   gachaGrid: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr 1fr",
+    gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))",
     gap: 8,
   },
   gachaCard: {
@@ -5291,10 +5576,15 @@ const styles = {
     flex: 1,
     overflowY: "auto",
     padding: "14px 16px 30px",
+    width: "100%",
+    maxWidth: 720,
+    marginLeft: "auto",
+    marginRight: "auto",
+    boxSizing: "border-box",
   },
   dashGrid: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
     gap: 8,
   },
   dashCard: {
@@ -5365,7 +5655,7 @@ const styles = {
   },
   tableStatGrid: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr 1fr",
+    gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))",
     gap: 7,
   },
   statCell: {
@@ -5403,6 +5693,33 @@ const styles = {
     color: "#C9C4F0",
     padding: "7px 0",
     borderBottom: "1px solid #2A2654",
+  },
+  backupBox: {
+    display: "flex",
+    gap: 8,
+  },
+  backupBtn: {
+    flex: 1,
+    background: "linear-gradient(180deg, #FFD23F 0%, #FFB23F 100%)",
+    border: "none",
+    borderRadius: 12,
+    padding: "11px 8px",
+    color: "#3A2400",
+    fontSize: 12,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  backupBtnOutline: {
+    flex: 1,
+    background: "#22204A",
+    border: "1px solid #4A4580",
+    borderRadius: 12,
+    padding: "11px 8px",
+    color: "#F5F3FF",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+    textAlign: "center",
   },
   dashNote: {
     fontSize: 10.5,
@@ -5590,7 +5907,7 @@ const styles = {
   },
   myGrid: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr 1fr",
+    gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))",
     gap: 8,
     marginBottom: 6,
   },
@@ -5650,6 +5967,10 @@ const styles = {
   },
   timerTrack: {
     position: "relative",
+    maxWidth: 560,
+    marginLeft: "auto",
+    marginRight: "auto",
+    width: "100%",
     height: 8,
     background: "#2A2654",
     borderRadius: 6,
@@ -5674,6 +5995,11 @@ const styles = {
     marginTop: -6,
   },
   problemCard: {
+    maxWidth: 560,
+    marginLeft: "auto",
+    marginRight: "auto",
+    width: "100%",
+    boxSizing: "border-box",
     background: "#F5F3FF",
     borderRadius: 20,
     padding: "26px 16px",
@@ -5692,6 +6018,10 @@ const styles = {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
     gap: 12,
+    maxWidth: 560,
+    marginLeft: "auto",
+    marginRight: "auto",
+    width: "100%",
   },
   choiceBtn: {
     padding: "18px 0",
@@ -5823,7 +6153,7 @@ const styles = {
   },
   shopGrid: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
     gap: 12,
   },
   shopCard: {
