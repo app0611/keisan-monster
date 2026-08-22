@@ -39,7 +39,7 @@
 // ---- じどう こうしん ----
 // ファイルを あげなおすと この ばんごうが かわる。
 // ホーム画面の アプリが ふるい ないようを もっていたら じどうで よみなおす。
-var APP_VERSION = "20260822-1137";
+var APP_VERSION = "20260822-1148";
 try {
   var seen = localStorage.getItem("app-version");
   if (seen !== APP_VERSION) {
@@ -316,6 +316,36 @@ function rollGacha() {
 function todayKey() {
   const d = new Date();
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+// ---------- ほごしゃむけ ダッシュボード ----------
+// このなん日かの ひづけを ふるいものから ならべる
+function lastDays(n) {
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    out.push({
+      key: `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`,
+      label: `${d.getMonth() + 1}/${d.getDate()}`,
+      dow: ["日", "月", "火", "水", "木", "金", "土"][d.getDay()],
+    });
+  }
+  return out;
+}
+
+function pct(correct, wrong) {
+  const total = correct + wrong;
+  if (!total) return null;
+  return Math.round((correct / total) * 100);
+}
+
+// せいとうりつに おうじた いろ
+function rateColor(p) {
+  if (p === null) return "#4A4580";
+  if (p >= 85) return "#7ED957";
+  if (p >= 65) return "#FFD23F";
+  return "#FF6B4A";
 }
 
 // ---------- しょうごう(じっせき) ----------
@@ -1736,11 +1766,16 @@ function MathMonsterBattle() {
     maxStreak: 0,
     evolveCount: 0,
     tableCorrect: {},
+    tableWrong: {},
     gradeCorrect: {},
+    gradeWrong: {},
+    daily: {}, // { "2026-8-22": { correct: 12, wrong: 3 } }
+    totalWrong: 0,
     seenBranches: [],
     reachedFinal: false,
   });
   const [confirmRebirth, setConfirmRebirth] = useState(false);
+  const [dashOpen, setDashOpen] = useState(false);
   // じさく モンスター
   const [myMonsters, setMyMonsters] = useState([]); // {id,name,image}
   const [draftImage, setDraftImage] = useState(null);
@@ -2013,7 +2048,11 @@ function MathMonsterBattle() {
       maxStreak: 0,
       evolveCount: 0,
       tableCorrect: {},
+      tableWrong: {},
       gradeCorrect: {},
+      gradeWrong: {},
+      daily: {},
+      totalWrong: 0,
       seenBranches: [],
       reachedFinal: false,
     });
@@ -2131,6 +2170,45 @@ function MathMonsterBattle() {
     return dmg;
   }
 
+  // せいかい/まちがいを きろくする(ダッシュボードよう)
+  function recordAnswer(correct, prob, curMode) {
+    const day = todayKey();
+    setRecords((r) => {
+      const next = { ...r };
+      // ひづけごと
+      const d = { ...(r.daily || {}) };
+      const cur = d[day] || { correct: 0, wrong: 0 };
+      d[day] = {
+        correct: cur.correct + (correct ? 1 : 0),
+        wrong: cur.wrong + (correct ? 0 : 1),
+      };
+      // ふるい きろくは 60にちぶんだけ のこす
+      const keys = Object.keys(d).sort();
+      if (keys.length > 60) keys.slice(0, keys.length - 60).forEach((k) => delete d[k]);
+      next.daily = d;
+
+      if (!correct) next.totalWrong = (r.totalWrong || 0) + 1;
+
+      // 学年ごと
+      if (curMode && curMode.startsWith("grade-")) {
+        const g = parseInt(curMode.split("-")[1], 10);
+        if (g >= 1 && g <= 6) {
+          const key = correct ? "gradeCorrect" : "gradeWrong";
+          next[key] = { ...(r[key] || {}), [g]: ((r[key] || {})[g] || 0) + 1 };
+        }
+      }
+      // 九九の だんごと
+      if (prob && prob.text && prob.text.includes("×")) {
+        const a = parseInt(prob.text.split("×")[0].trim(), 10);
+        if (a >= 1 && a <= 9) {
+          const key = correct ? "tableCorrect" : "tableWrong";
+          next[key] = { ...(r[key] || {}), [a]: ((r[key] || {})[a] || 0) + 1 };
+        }
+      }
+      return next;
+    });
+  }
+
   function resolveTurn(choice, forcedType) {
     if (feedback || stageClear || evolveEvent || branchPrompt) return;
     const elapsed = timeLimit - remainingRef.current;
@@ -2163,29 +2241,11 @@ function MathMonsterBattle() {
       expFracRef.current = exactExp - gainedExp;
       if (gainedExp > 0) setExp((e) => e + gainedExp);
       if (isCritical) setRecords((r) => ({ ...r, critCount: r.critCount + 1 }));
-      // 学年べつの せいかいすう(しょうごうよう)
-      if (mode && mode.startsWith("grade-")) {
-        const g = parseInt(mode.split("-")[1], 10);
-        if (g >= 1 && g <= 6) {
-          setRecords((r) => ({
-            ...r,
-            gradeCorrect: { ...(r.gradeCorrect || {}), [g]: ((r.gradeCorrect || {})[g] || 0) + 1 },
-          }));
-        }
-      }
-      // 九九は だんごとに かぞえる(しょうごうよう)
-      if (problem.text && problem.text.includes("×")) {
-        const a = parseInt(problem.text.split("×")[0].trim(), 10);
-        if (a >= 1 && a <= 9) {
-          setRecords((r) => ({
-            ...r,
-            tableCorrect: { ...r.tableCorrect, [a]: (r.tableCorrect[a] || 0) + 1 },
-          }));
-        }
-      }
+      recordAnswer(true, problem, mode);
       setEnemyHp((hp) => Math.max(0, hp - dmg));
     } else {
       const type = forcedType === "timeout" ? "timeout" : "wrong";
+      recordAnswer(false, problem, mode);
       const dmg = applyEnemyAttack();
       setFeedback({ type });
       setFloatingText(`-${dmg}`);
@@ -2793,6 +2853,156 @@ function MathMonsterBattle() {
           ))}
         </div>
 
+        {dashOpen && (
+          <div style={styles.dashOverlay}>
+            <div style={styles.dashHeader}>
+              <span style={styles.dashTitle}>📊 まなびの きろく</span>
+              <button onClick={() => setDashOpen(false)} style={styles.drawClose}>
+                ✕ とじる
+              </button>
+            </div>
+
+            <div style={styles.dashBody}>
+              {/* まとめ */}
+              <div style={styles.dashGrid}>
+                {[
+                  { label: "つうさん せいかい", value: correctCount },
+                  {
+                    label: "せいとうりつ",
+                    value:
+                      pct(correctCount, records.totalWrong || 0) === null
+                        ? "—"
+                        : `${pct(correctCount, records.totalWrong || 0)}%`,
+                  },
+                  { label: "さいこう れんぞく", value: records.maxStreak || 0 },
+                  { label: "ボス げきは", value: records.bossDefeated || 0 },
+                ].map((c) => (
+                  <div key={c.label} style={styles.dashCard}>
+                    <div style={styles.dashValue}>{c.value}</div>
+                    <div style={styles.dashLabel}>{c.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* このなのか */}
+              <div style={styles.dashSection}>この 7日かん</div>
+              {(() => {
+                const days = lastDays(7);
+                const vals = days.map((d) => (records.daily || {})[d.key] || { correct: 0, wrong: 0 });
+                const max = Math.max(1, ...vals.map((v) => v.correct + v.wrong));
+                const weekCorrect = vals.reduce((a, v) => a + v.correct, 0);
+                const weekWrong = vals.reduce((a, v) => a + v.wrong, 0);
+                return (
+                  <>
+                    <div style={styles.chartRow}>
+                      {days.map((d, i) => {
+                        const v = vals[i];
+                        const total = v.correct + v.wrong;
+                        return (
+                          <div key={d.key} style={styles.chartCol}>
+                            <div style={styles.chartBarWrap}>
+                              <div
+                                style={{
+                                  ...styles.chartBarWrong,
+                                  height: `${(v.wrong / max) * 100}%`,
+                                }}
+                              />
+                              <div
+                                style={{
+                                  ...styles.chartBarOk,
+                                  height: `${(v.correct / max) * 100}%`,
+                                }}
+                              />
+                            </div>
+                            <div style={styles.chartNum}>{total || ""}</div>
+                            <div style={styles.chartDay}>{d.label}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={styles.dashNote}>
+                      7日かんで {weekCorrect + weekWrong}もん(せいかい {weekCorrect} ・ まちがい{" "}
+                      {weekWrong})
+                    </div>
+                  </>
+                );
+              })()}
+
+              {/* 九九 */}
+              <div style={styles.dashSection}>九九の だんべつ せいとうりつ</div>
+              <div style={styles.tableStatGrid}>
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => {
+                  const c = (records.tableCorrect || {})[n] || 0;
+                  const w = (records.tableWrong || {})[n] || 0;
+                  const p = pct(c, w);
+                  return (
+                    <div key={n} style={{ ...styles.statCell, borderColor: rateColor(p) }}>
+                      <div style={styles.statName}>{n}のだん</div>
+                      <div style={{ ...styles.statRate, color: rateColor(p) }}>
+                        {p === null ? "—" : `${p}%`}
+                      </div>
+                      <div style={styles.statSub}>{c + w > 0 ? `${c + w}もん` : "みちょうせん"}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 学年 */}
+              <div style={styles.dashSection}>学年べつ</div>
+              <div style={styles.tableStatGrid}>
+                {[1, 2, 3, 4, 5, 6].map((g) => {
+                  const c = (records.gradeCorrect || {})[g] || 0;
+                  const w = (records.gradeWrong || {})[g] || 0;
+                  const p = pct(c, w);
+                  return (
+                    <div key={g} style={{ ...styles.statCell, borderColor: rateColor(p) }}>
+                      <div style={styles.statName}>{g}年生</div>
+                      <div style={{ ...styles.statRate, color: rateColor(p) }}>
+                        {p === null ? "—" : `${p}%`}
+                      </div>
+                      <div style={styles.statSub}>{c + w > 0 ? `${c + w}もん` : "みちょうせん"}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* いまの ようす */}
+              <div style={styles.dashSection}>いまの ようす</div>
+              <div style={styles.dashList}>
+                <div style={styles.dashListRow}>
+                  <span>すがた</span>
+                  <span>
+                    {stage.name}
+                    {rebirth > 0 && ` (てんせい ${rebirth})`}
+                  </span>
+                </div>
+                <div style={styles.dashListRow}>
+                  <span>ステージ / けいけんち</span>
+                  <span>
+                    {stageNumber} / {exp}
+                  </span>
+                </div>
+                <div style={styles.dashListRow}>
+                  <span>タワー さいこう</span>
+                  <span>{bestFloor > 0 ? `${bestFloor}かい` : "—"}</span>
+                </div>
+                <div style={styles.dashListRow}>
+                  <span>会心の一撃</span>
+                  <span>{records.critCount || 0}かい</span>
+                </div>
+                <div style={styles.dashListRow}>
+                  <span>じさく モンスター</span>
+                  <span>{myMonsters.length}たい</span>
+                </div>
+              </div>
+
+              <div style={styles.dashNote}>
+                せいとうりつは この きのうを いれた あとの ぶんだけ かぞえています
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={styles.startContent}>
           {towerResult && (
             <div style={styles.towerResult}>
@@ -3074,6 +3284,10 @@ function MathMonsterBattle() {
               </div>
             </div>
           )}
+
+          <button onClick={() => setDashOpen(true)} style={styles.dashOpenBtn}>
+            📊 まなびの きろく(ほごしゃむけ)
+          </button>
 
           {/* ぼうけんのきろく */}
           <div style={styles.saveBox}>
@@ -5020,6 +5234,162 @@ const styles = {
     fontWeight: 800,
     color: "#FFD23F",
     marginTop: 2,
+  },
+  dashOpenBtn: {
+    marginTop: 18,
+    background: "transparent",
+    border: "1px solid #4A4580",
+    borderRadius: 14,
+    padding: "8px 16px",
+    color: "#8A85B8",
+    fontSize: 11.5,
+    cursor: "pointer",
+  },
+  dashOverlay: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 55,
+    background: "#16142F",
+    display: "flex",
+    flexDirection: "column",
+    paddingTop: "env(safe-area-inset-top)",
+    paddingBottom: "env(safe-area-inset-bottom)",
+  },
+  dashHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "12px 14px",
+    borderBottom: "1px solid #362F66",
+  },
+  dashTitle: {
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 15,
+    color: "#F5F3FF",
+  },
+  dashBody: {
+    flex: 1,
+    overflowY: "auto",
+    padding: "14px 16px 30px",
+  },
+  dashGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 8,
+  },
+  dashCard: {
+    background: "#22204A",
+    border: "1px solid #362F66",
+    borderRadius: 12,
+    padding: "12px 10px",
+    textAlign: "center",
+  },
+  dashValue: {
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 22,
+    color: "#FFD23F",
+  },
+  dashLabel: {
+    fontSize: 10.5,
+    color: "#8A85B8",
+    marginTop: 2,
+  },
+  dashSection: {
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#B8B3E0",
+    margin: "20px 0 8px",
+    letterSpacing: 1,
+  },
+  chartRow: {
+    display: "flex",
+    alignItems: "flex-end",
+    gap: 6,
+    height: 130,
+  },
+  chartCol: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    height: "100%",
+  },
+  chartBarWrap: {
+    flex: 1,
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "flex-end",
+    background: "#1E1C42",
+    borderRadius: 5,
+    overflow: "hidden",
+  },
+  chartBarWrong: {
+    width: "100%",
+    background: "#FF6B4A",
+  },
+  chartBarOk: {
+    width: "100%",
+    background: "#7ED957",
+  },
+  chartNum: {
+    fontSize: 10,
+    color: "#C9C4F0",
+    marginTop: 3,
+    minHeight: 12,
+  },
+  chartDay: {
+    fontSize: 9,
+    color: "#6F6A9C",
+  },
+  tableStatGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr 1fr",
+    gap: 7,
+  },
+  statCell: {
+    background: "#22204A",
+    borderWidth: 2,
+    borderStyle: "solid",
+    borderRadius: 10,
+    padding: "8px 4px",
+    textAlign: "center",
+  },
+  statName: {
+    fontSize: 10.5,
+    color: "#C9C4F0",
+    fontWeight: 700,
+  },
+  statRate: {
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 17,
+  },
+  statSub: {
+    fontSize: 9,
+    color: "#6F6A9C",
+  },
+  dashList: {
+    background: "#1E1C42",
+    border: "1px solid #302B5C",
+    borderRadius: 12,
+    padding: "6px 12px",
+  },
+  dashListRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    fontSize: 12,
+    color: "#C9C4F0",
+    padding: "7px 0",
+    borderBottom: "1px solid #2A2654",
+  },
+  dashNote: {
+    fontSize: 10.5,
+    color: "#6F6A9C",
+    marginTop: 8,
+    lineHeight: 1.6,
   },
   drawOverlay: {
     position: "fixed",
