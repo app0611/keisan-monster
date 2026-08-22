@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#1B1B3A">
 <title>けいさんモンスターバトル</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="けいさんモンスター">
@@ -33,6 +36,22 @@
 </div>
 
 <script>
+// ---- じどう こうしん ----
+// ファイルを あげなおすと この ばんごうが かわる。
+// ホーム画面の アプリが ふるい ないようを もっていたら じどうで よみなおす。
+var APP_VERSION = "20260822-1137";
+try {
+  var seen = localStorage.getItem("app-version");
+  if (seen !== APP_VERSION) {
+    localStorage.setItem("app-version", APP_VERSION);
+    if (seen && location.search.indexOf("v=") === -1) {
+      location.replace(location.pathname + "?v=" + APP_VERSION);
+    }
+  }
+} catch (e) {
+  // ほぞんが つかえなくても アプリは うごく
+}
+
 // CDNから ライブラリを よみこむ。ダメなら べつの CDNを ためす。
 var CDNS = [
   "https://unpkg.com/",
