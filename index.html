@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20260822-200414";
+var APP_VERSION = "20260822-213505";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -589,7 +589,48 @@ function modeLabel(mode, selectedTables) {
   return `${n}のだん`;
 }
 
-const STORAGE_KEY = "math-monster-save";
+const STORAGE_KEY = "math-monster-save"; // むかしの セーブ(1人目に ひきつぐ)
+const PROFILE_LIST_KEY = "math-monster-profiles";
+const ACTIVE_PROFILE_KEY = "math-monster-active";
+const PROFILE_MAX = 4;
+const PROFILE_ICONS = ["🦖", "🐰", "🐱", "🐻", "🦊", "🐧", "🦁", "🐸"];
+
+// その人の セーブが しまわれる ばしょ
+function saveKeyFor(profileId) {
+  return profileId === "p1" ? STORAGE_KEY : `math-monster-save-${profileId}`;
+}
+
+// プロフィールの いちらんを よみだす。なければ 1人目を つくる
+function loadProfiles() {
+  try {
+    const raw = localStorage.getItem(PROFILE_LIST_KEY);
+    if (raw) {
+      const list = JSON.parse(raw);
+      if (Array.isArray(list) && list.length) return list;
+    }
+  } catch (e) {
+    // よみこめなければ つくりなおす
+  }
+  // むかしからの セーブが あれば それを 1人目に する
+  const hasOld = (() => {
+    try {
+      return !!localStorage.getItem(STORAGE_KEY);
+    } catch (e) {
+      return false;
+    }
+  })();
+  return [{ id: "p1", name: hasOld ? "1人目" : "プレイヤー1", icon: "🦖" }];
+}
+
+function loadActiveProfile(list) {
+  try {
+    const id = localStorage.getItem(ACTIVE_PROFILE_KEY);
+    if (id && list.some((p) => p.id === id)) return id;
+  } catch (e) {
+    // そのまま 1人目に する
+  }
+  return list[0].id;
+}
 
 // ---------- 難易度・問題生成 ----------
 
@@ -1896,6 +1937,12 @@ function MathMonsterBattle() {
   const [confirmRebirth, setConfirmRebirth] = useState(false);
   const [dashOpen, setDashOpen] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
+  // プロフィール(きょうだいで つかいわける)
+  const [profiles, setProfiles] = useState(() => loadProfiles());
+  const [activeId, setActiveId] = useState(() => loadActiveProfile(loadProfiles()));
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [newProfileName, setNewProfileName] = useState("");
+  const [delProfileId, setDelProfileId] = useState(null);
   // じさく モンスター
   const [myMonsters, setMyMonsters] = useState([]); // {id,name,image}
   const [draftImage, setDraftImage] = useState(null);
@@ -1996,7 +2043,7 @@ function MathMonsterBattle() {
   useEffect(() => {
     (async () => {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
+        const raw = localStorage.getItem(saveKeyFor(activeId));
         if (raw) {
           const data = JSON.parse(raw);
           setPoints(data.points ?? 0);
@@ -2067,7 +2114,7 @@ function MathMonsterBattle() {
     saveTimer.current = setTimeout(async () => {
       try {
         localStorage.setItem(
-          STORAGE_KEY,
+          saveKeyFor(activeId),
           JSON.stringify({
             points,
             correctCount,
@@ -2105,6 +2152,7 @@ function MathMonsterBattle() {
     }, 400);
   }, [
     loaded,
+    activeId,
     points,
     correctCount,
     owned,
@@ -2133,7 +2181,7 @@ function MathMonsterBattle() {
   // さいしょから やりなおす
   async function resetSave() {
     try {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(saveKeyFor(activeId));
     } catch (e) {
       // 保存データがもともと無い場合は無視してよい
     }
@@ -2737,11 +2785,63 @@ function MathMonsterBattle() {
   }
 
 
+  // ---------- プロフィール(きょうだい) ----------
+  function persistProfiles(list, active) {
+    try {
+      localStorage.setItem(PROFILE_LIST_KEY, JSON.stringify(list));
+      if (active) localStorage.setItem(ACTIVE_PROFILE_KEY, active);
+    } catch (e) {
+      // ほぞんできなくても そのかいは あそべる
+    }
+  }
+
+  // ほかの人に きりかえる。とちゅうの データが まざらないよう よみなおす
+  function switchProfile(id) {
+    if (id === activeId) {
+      setProfileOpen(false);
+      return;
+    }
+    persistProfiles(profiles, id);
+    location.reload();
+  }
+
+  function addProfile() {
+    if (profiles.length >= PROFILE_MAX) return;
+    const name = (newProfileName || "").trim() || `プレイヤー${profiles.length + 1}`;
+    const id = `p${Date.now().toString(36)}`;
+    const icon = PROFILE_ICONS[profiles.length % PROFILE_ICONS.length];
+    const list = [...profiles, { id, name: name.slice(0, 8), icon }];
+    setProfiles(list);
+    setNewProfileName("");
+    persistProfiles(list, id);
+    location.reload();
+  }
+
+  function removeProfile(id) {
+    if (profiles.length <= 1) return;
+    const list = profiles.filter((p) => p.id !== id);
+    try {
+      localStorage.removeItem(saveKeyFor(id));
+    } catch (e) {
+      // けせなくても いちらんからは なくなる
+    }
+    setProfiles(list);
+    setDelProfileId(null);
+    if (id === activeId) {
+      persistProfiles(list, list[0].id);
+      location.reload();
+    } else {
+      persistProfiles(list, activeId);
+    }
+  }
+
+  const activeProfile = profiles.find((p) => p.id === activeId) || profiles[0];
+
   // ---------- セーブデータの ほぞんと ふくげん ----------
   // いまの データを まとめて ファイルに おとす
   function exportSave() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(saveKeyFor(activeId));
       if (!raw) {
         setItemToast("まだ きろくが ありません");
         return;
@@ -2785,7 +2885,7 @@ function MathMonsterBattle() {
       if (typeof data !== "object" || data === null) {
         throw new Error("形式が ちがいます");
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      localStorage.setItem(saveKeyFor(activeId), JSON.stringify(data));
       setItemToast("✅ ふくげんしました。よみなおします");
       setTimeout(() => location.reload(), 900);
     } catch (err) {
@@ -3038,6 +3138,67 @@ function MathMonsterBattle() {
           ))}
         </div>
 
+        {profileOpen && (
+          <div style={styles.evoOverlay}>
+            <div style={styles.evoCaption}>だれが あそぶ?</div>
+            <div style={styles.profileList}>
+              {profiles.map((p) => (
+                <div
+                  key={p.id}
+                  style={{
+                    ...styles.profileRow,
+                    borderColor: p.id === activeId ? "#FFD23F" : "#4A4580",
+                  }}
+                >
+                  <button onClick={() => switchProfile(p.id)} style={styles.profilePick}>
+                    <span style={{ fontSize: 24 }}>{p.icon}</span>
+                    <span style={styles.profileName}>{p.name}</span>
+                    {p.id === activeId && <span style={styles.profileNow}>いま</span>}
+                  </button>
+                  {profiles.length > 1 &&
+                    (delProfileId === p.id ? (
+                      <span style={styles.profileDelRow}>
+                        <button onClick={() => removeProfile(p.id)} style={styles.resetYesBtn}>
+                          けす
+                        </button>
+                        <button onClick={() => setDelProfileId(null)} style={styles.resetNoBtn}>
+                          やめる
+                        </button>
+                      </span>
+                    ) : (
+                      <button onClick={() => setDelProfileId(p.id)} style={styles.myDelete}>
+                        けす
+                      </button>
+                    ))}
+                </div>
+              ))}
+            </div>
+
+            {profiles.length < PROFILE_MAX && (
+              <div style={styles.profileAddRow}>
+                <input
+                  type="text"
+                  value={newProfileName}
+                  onChange={(e) => setNewProfileName(e.target.value)}
+                  placeholder="なまえ"
+                  maxLength={8}
+                  style={{ ...styles.draftInput, width: 130 }}
+                />
+                <button onClick={addProfile} style={styles.draftSave}>
+                  ＋ ふやす
+                </button>
+              </div>
+            )}
+
+            <div style={styles.branchWarn}>
+              ひとりずつ べつの きろくに なります(さいだい {PROFILE_MAX}人)
+            </div>
+            <button onClick={() => setProfileOpen(false)} style={styles.evoBtn}>
+              とじる
+            </button>
+          </div>
+        )}
+
         {dashOpen && (
           <div style={styles.dashOverlay}>
             <div style={styles.dashHeader}>
@@ -3247,6 +3408,13 @@ function MathMonsterBattle() {
               </button>
             </div>
           )}
+          {/* だれが あそぶか */}
+          <button onClick={() => setProfileOpen(true)} style={styles.profileChip}>
+            <span style={{ fontSize: 17 }}>{activeProfile.icon}</span>
+            <span style={styles.profileChipName}>{activeProfile.name}</span>
+            <span style={styles.profileChipSwap}>きりかえ</span>
+          </button>
+
           <div style={styles.startEyebrow}>けいさん × モンスターバトル</div>
           <div className="start-title" style={styles.startTitle}>
             けいさん
@@ -5538,6 +5706,79 @@ const styles = {
     fontWeight: 800,
     color: "#FFD23F",
     marginTop: 2,
+  },
+  profileChip: {
+    display: "flex",
+    alignItems: "center",
+    gap: 7,
+    background: "#22204A",
+    border: "1px solid #4A4580",
+    borderRadius: 20,
+    padding: "6px 14px",
+    color: "#F5F3FF",
+    cursor: "pointer",
+    marginBottom: 14,
+  },
+  profileChipName: {
+    fontSize: 13,
+    fontWeight: 700,
+  },
+  profileChipSwap: {
+    fontSize: 10,
+    color: "#8A85B8",
+    borderLeft: "1px solid #4A4580",
+    paddingLeft: 8,
+  },
+  profileList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    width: "100%",
+    maxWidth: 320,
+    marginTop: 6,
+  },
+  profileRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    background: "#22204A",
+    borderWidth: 2,
+    borderStyle: "solid",
+    borderRadius: 14,
+    padding: "8px 12px",
+  },
+  profilePick: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: "transparent",
+    border: "none",
+    color: "#F5F3FF",
+    cursor: "pointer",
+    flex: 1,
+    textAlign: "left",
+  },
+  profileName: {
+    fontSize: 14,
+    fontWeight: 700,
+  },
+  profileNow: {
+    fontSize: 9,
+    fontWeight: 800,
+    color: "#3A2400",
+    background: "#FFD23F",
+    borderRadius: 8,
+    padding: "1px 7px",
+  },
+  profileDelRow: {
+    display: "flex",
+    gap: 6,
+  },
+  profileAddRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 14,
   },
   dashOpenBtn: {
     marginTop: 18,
