@@ -37,20 +37,39 @@
 
 <script>
 // ---- じどう こうしん ----
-// ファイルを あげなおすと この ばんごうが かわる。
-// ホーム画面の アプリが ふるい ないようを もっていたら じどうで よみなおす。
-var APP_VERSION = "20260822-1148";
-try {
-  var seen = localStorage.getItem("app-version");
-  if (seen !== APP_VERSION) {
-    localStorage.setItem("app-version", APP_VERSION);
-    if (seen && location.search.indexOf("v=") === -1) {
-      location.replace(location.pathname + "?v=" + APP_VERSION);
-    }
+// じぶんの ばんごう
+var APP_VERSION = "20260822-121803";
+
+// サーバーに「いまの さいしんは なにか」を きく。
+// ふるい ないようが のこっていても、この といあわせは かならず
+// ネットワークまで とどくので、ちゃんと きづける。
+(function checkUpdate() {
+  try {
+    // すでに よみなおした あとなら なにもしない
+    if (location.search.indexOf("v=") !== -1) return;
+
+    var url = location.pathname + "?_=" + Date.now();
+    fetch(url, { cache: "no-store" })
+      .then(function (r) {
+        return r.ok ? r.text() : null;
+      })
+      .then(function (text) {
+        if (!text) return;
+        var m = text.match(/APP_VERSION = "([^"]+)"/);
+        if (!m) return;
+        var latest = m[1];
+        if (latest !== APP_VERSION) {
+          // あたらしいものが あるので よみなおす
+          location.replace(location.pathname + "?v=" + latest);
+        }
+      })
+      .catch(function () {
+        // つながらなくても そのまま あそべる
+      });
+  } catch (e) {
+    // なにか あっても アプリは うごかす
   }
-} catch (e) {
-  // ほぞんが つかえなくても アプリは うごく
-}
+})();
 
 // CDNから ライブラリを よみこむ。ダメなら べつの CDNを ためす。
 var CDNS = [
