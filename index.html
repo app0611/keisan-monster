@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20260823-022912";
+var APP_VERSION = "20260823-024149";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -4180,7 +4180,7 @@ function MathMonsterBattle() {
             どちらに しんかする?
           </div>
           <div style={styles.branchRow}>
-            {[...BRANCHES, ...(specialUnlocked || branch === "special" ? [SPECIAL_BRANCH] : [])].map((b) => {
+            {BRANCHES.map((b) => {
               const st = { id: b.id, ...STAGE_DEFS[b.id] };
               return (
                 <button key={b.id} onClick={() => chooseBranch(b.id)} style={styles.branchCard}>
@@ -4651,7 +4651,27 @@ function MathMonsterBattle() {
           <div style={styles.shopHeader}>ずかん</div>
 
           <div style={styles.shopGroupLabel}>🐣 なかま</div>
-          {BRANCHES.map((b) => {
+          {[...BRANCHES, SPECIAL_BRANCH].map((b) => {
+            // とくべつルートは 解放するまで 1ぎょうだけ みせる
+            if (b.id === "special" && !specialUnlocked && branch !== "special") {
+              const done = (records.finishedRoutes || []).filter((x) =>
+                ["surikara", "gekkopika"].includes(x)
+              ).length;
+              return (
+                <div key="special-locked" style={{ marginBottom: 12 }}>
+                  <div style={styles.branchLabel}>🔒 ？？？の みち</div>
+                  <div style={{ ...styles.dexCard, opacity: 0.55 }}>
+                    <div style={{ fontSize: 26, width: 34, textAlign: "center" }}>❔</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={styles.dexName}>？？？</div>
+                      <div style={styles.dexReq}>
+                        2つの みちを さいごまで そだてると あらわれる({done}/2)
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
             const path = BRANCH_PATHS[b.id];
             const isMine = branch === b.id;
             return (
