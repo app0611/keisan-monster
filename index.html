@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20260823-021143";
+var APP_VERSION = "20260823-022912";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -354,6 +354,24 @@ function todayKey() {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
 
+// つづけて あそんだ 日すうを かぞえる
+function countStreakDays(days) {
+  if (!days || !days.length) return 0;
+  const toNum = (k) => {
+    const [y, m, d] = k.split("-").map(Number);
+    return Date.UTC(y, m - 1, d) / 86400000;
+  };
+  const nums = days.map(toNum).sort((a, b) => a - b);
+  let best = 1;
+  let cur = 1;
+  for (let i = 1; i < nums.length; i++) {
+    if (nums[i] === nums[i - 1] + 1) cur++;
+    else if (nums[i] !== nums[i - 1]) cur = 1;
+    best = Math.max(best, cur);
+  }
+  return best;
+}
+
 // ---------- ほごしゃむけ ダッシュボード ----------
 // このなん日かの ひづけを ふるいものから ならべる
 function lastDays(n) {
@@ -412,6 +430,41 @@ const ACHIEVEMENTS = [
     check: (r) => r.bestFloor >= 5 },
   { id: "tower15", emoji: "🌟", name: "タワー 15かい", desc: "エンドレスタワーで 15かいまで のぼる",
     check: (r) => r.bestFloor >= 15 },
+  // つづける ちから
+  { id: "days3", emoji: "📅", name: "3日 つづけた", desc: "3日 れんぞくで あそぶ",
+    check: (r) => (r.bestStreakDays || 0) >= 3 },
+  { id: "days7", emoji: "🗓️", name: "1しゅうかん つづけた", desc: "7日 れんぞくで あそぶ",
+    check: (r) => (r.bestStreakDays || 0) >= 7 },
+  { id: "days30", emoji: "🔥", name: "1かげつ つづけた", desc: "30日 れんぞくで あそぶ",
+    check: (r) => (r.bestStreakDays || 0) >= 30 },
+  { id: "play20", emoji: "🌱", name: "20日 あそんだ", desc: "つうさん 20日 あそぶ",
+    check: (r) => (r.playDays?.length || 0) >= 20 },
+  // うでまえ
+  { id: "perfect5", emoji: "✨", name: "ノーミス 5かい", desc: "1もんも まちがえずに ステージクリア 5かい",
+    check: (r) => (r.perfectStages || 0) >= 5 },
+  { id: "perfect25", emoji: "💎", name: "ノーミス 25かい", desc: "1もんも まちがえずに ステージクリア 25かい",
+    check: (r) => (r.perfectStages || 0) >= 25 },
+  { id: "fast30", emoji: "⏱️", name: "でんこうせっか", desc: "ステージを 30びょういないで クリア",
+    check: (r) => r.bestStageTime > 0 && r.bestStageTime <= 30000 },
+  { id: "streak50", emoji: "🌟", name: "50れんぞく", desc: "50もん れんぞく せいかい",
+    check: (r) => (r.maxStreak || 0) >= 50 },
+  { id: "crit200", emoji: "⚔️", name: "かいしんの ごくい", desc: "会心の一撃を 200かい だす",
+    check: (r) => (r.critCount || 0) >= 200 },
+  { id: "notimeout", emoji: "🧠", name: "おちついて こたえる", desc: "100もん せいかいまで じかんぎれ 5かい いない",
+    check: (r) => (r.correctCount || 0) >= 100 && (r.timeoutCount || 0) <= 5 },
+  // ぼうけん
+  { id: "correct1000", emoji: "👑", name: "けいさん たつじん", desc: "つうさん 1000もん せいかい",
+    check: (r) => (r.correctCount || 0) >= 1000 },
+  { id: "boss30", emoji: "🐲", name: "ボス キラー", desc: "ボスを 30たい たおす",
+    check: (r) => (r.bossDefeated || 0) >= 30 },
+  { id: "tower30", emoji: "🏔️", name: "タワー 30かい", desc: "エンドレスタワーで 30かいまで のぼる",
+    check: (r) => (r.bestFloor || 0) >= 30 },
+  { id: "rebirth3", emoji: "♻️", name: "3かい てんせい", desc: "3かい てんせいする",
+    check: (r) => (r.rebirth || 0) >= 3 },
+  { id: "allroutes", emoji: "🎇", name: "すべての みち", desc: "3つの ルートを すべて さいごまで そだてる",
+    check: (r) => ["surikara", "gekkopika", "special"].every((x) => (r.finishedRoutes || []).includes(x)) },
+  { id: "tough", emoji: "🛡️", name: "ふくつの こころ", desc: "10かい たおれても あきらめない",
+    check: (r) => (r.reviveCount || 0) >= 10 },
   { id: "shopper", emoji: "🛒", name: "そうび コンプリート", desc: "そうびを ぜんぶ そろえる",
     check: (r) => (r.owned?.length || 0) >= 11 },
   { id: "g1", emoji: "1️⃣", name: "1年生 マスター", desc: "1年生の もんだいで 100もん せいかい",
@@ -2026,6 +2079,12 @@ function MathMonsterBattle() {
     seenBranches: [],
     finishedRoutes: [],
     reachedFinal: false,
+    playDays: [],      // あそんだ ひづけ
+    bestStreakDays: 0, // さいこう れんぞく日すう
+    perfectStages: 0,  // ノーミスで クリアした ステージ
+    bestStageTime: 0,  // いちばん はやい ステージクリア(ms)
+    timeoutCount: 0,   // じかんぎれの かず
+    reviveCount: 0,    // たおれた かず
   });
   const [confirmRebirth, setConfirmRebirth] = useState(false);
   const [dashOpen, setDashOpen] = useState(false);
@@ -2089,6 +2148,7 @@ function MathMonsterBattle() {
   const answeredRef = useRef(false);
   const stageStartPoints = useRef(0);
   const stageStartTime = useRef(Date.now());
+  const stageWrongRef = useRef(0); // いまの ステージで まちがえた かず
   const recentResultsRef = useRef([]);
   // 1もんあたりの ほうしゅうは ちいさいので、はんぱを つぎに もちこす
   const pointFracRef = useRef(0);
@@ -2328,6 +2388,12 @@ function MathMonsterBattle() {
       seenBranches: [],
       finishedRoutes: [],
       reachedFinal: false,
+      playDays: [],
+      bestStreakDays: 0,
+      perfectStages: 0,
+      bestStageTime: 0,
+      timeoutCount: 0,
+      reviveCount: 0,
     });
     setStageClear(null);
     setEvolveEvent(null);
@@ -2449,6 +2515,12 @@ function MathMonsterBattle() {
     const day = todayKey();
     setRecords((r) => {
       const next = { ...r };
+      // あそんだ日と れんぞく日すう
+      const days = Array.from(new Set([...(r.playDays || []), day])).sort();
+      if (days.length > 400) days.splice(0, days.length - 400);
+      next.playDays = days;
+      next.bestStreakDays = Math.max(r.bestStreakDays || 0, countStreakDays(days));
+
       // ひづけごと
       const d = { ...(r.daily || {}) };
       const cur = d[day] || { correct: 0, wrong: 0 };
@@ -2524,7 +2596,9 @@ function MathMonsterBattle() {
       setEnemyHp((hp) => Math.max(0, hp - dmg));
     } else {
       const type = forcedType === "timeout" ? "timeout" : "wrong";
+      if (type === "timeout") setRecords((r) => ({ ...r, timeoutCount: (r.timeoutCount || 0) + 1 }));
       recordAnswer(false, problem, mode);
+      stageWrongRef.current += 1;
       const dmg = applyEnemyAttack();
       setFeedback({ type });
       setFloatingText(`-${dmg}`);
@@ -2558,6 +2632,14 @@ function MathMonsterBattle() {
         const bonus = timeBonusFor(elapsed, beaten.isBoss);
         const bonusScaled = Math.round(bonus * rewardMult(mode));
         if (bonusScaled > 0) setPoints((pt) => pt + bonusScaled);
+        // ノーミスで クリアできたか / いちばん はやい タイム
+        const noMiss = stageWrongRef.current === 0;
+        setRecords((r) => ({
+          ...r,
+          perfectStages: (r.perfectStages || 0) + (noMiss ? 1 : 0),
+          bestStageTime:
+            !r.bestStageTime || elapsed < r.bestStageTime ? elapsed : r.bestStageTime,
+        }));
         const gainedExp = Math.round(
           (beaten.isBoss ? EXP_PER_BOSS : EXP_PER_STAGE) * rewardMult(mode)
         );
@@ -2608,6 +2690,7 @@ function MathMonsterBattle() {
     setEnemyHp(enemyForStage(next).hp);
     stageStartPoints.current = points;
     stageStartTime.current = Date.now();
+    stageWrongRef.current = 0;
     setStageClear(null);
     setTab("battle");
     const built = buildProblemState(next, difficulty, recentResultsRef.current, mode, selectedTables);
@@ -2631,6 +2714,7 @@ function MathMonsterBattle() {
           setPlayerHp(maxHp);
           return;
         }
+        setRecords((r) => ({ ...r, reviveCount: (r.reviveCount || 0) + 1 }));
         if (towerMode) {
           // タワーは ここで しゅうりょう
           const reached = towerFloor;
@@ -2847,6 +2931,7 @@ function MathMonsterBattle() {
   // どの タブから はいっても もんだいと タイマーを しょきかする
   function enterGame(startTab = "battle") {
     stageStartTime.current = Date.now();
+    stageWrongRef.current = 0;
     lastTickRef.current = Date.now();
     answeredRef.current = false;
     recentResultsRef.current = [];
@@ -3489,6 +3574,21 @@ function MathMonsterBattle() {
                 <div style={styles.dashListRow}>
                   <span>会心の一撃</span>
                   <span>{records.critCount || 0}かい</span>
+                </div>
+                <div style={styles.dashListRow}>
+                  <span>しょうごう</span>
+                  <span>
+                    {
+                      ACHIEVEMENTS.filter((a) =>
+                        a.check({ ...records, correctCount, rebirth, bestFloor, owned, myMonsters, gachaCount, gachaOwned })
+                      ).length
+                    }{" "}
+                    / {ACHIEVEMENTS.length}
+                  </span>
+                </div>
+                <div style={styles.dashListRow}>
+                  <span>れんぞく プレイ</span>
+                  <span>さいこう {records.bestStreakDays || 0}日</span>
                 </div>
                 <div style={styles.dashListRow}>
                   <span>じさく モンスター</span>
@@ -4712,7 +4812,15 @@ function MathMonsterBattle() {
             </>
           )}
 
-          <div style={styles.shopGroupLabel}>🏅 しょうごう</div>
+          {(() => {
+            const ctx = { ...records, correctCount, rebirth, bestFloor, owned, myMonsters, gachaCount, gachaOwned };
+            const got = ACHIEVEMENTS.filter((a) => a.check(ctx)).length;
+            return (
+              <div style={styles.shopGroupLabel}>
+                🏅 しょうごう({got}/{ACHIEVEMENTS.length})
+              </div>
+            );
+          })()}
           <div style={styles.dexList}>
             {ACHIEVEMENTS.map((a) => {
               const got = a.check({ ...records, correctCount, rebirth, bestFloor, owned, myMonsters, gachaCount, gachaOwned });
