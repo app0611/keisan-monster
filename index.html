@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20260823-024149";
+var APP_VERSION = "20260823-235546";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -170,10 +170,10 @@ const SPECIAL_BRANCH = {
 
 // みちごとの とくちょう
 const BRANCH_BONUS = {
-  surikara: { atk: 1, def: 1, timeMult: 1, critBonus: 0, pointMult: 1 },
-  gekkopika: { atk: 0, def: 0, timeMult: 1.25, critBonus: 0.06, pointMult: 1.2 },
+  surikara: { atk: 1, def: 1, timeMult: 1, pointMult: 1 },
+  gekkopika: { atk: 0, def: 0, timeMult: 1.25, pointMult: 1.2 },
   // まもりは かたいが、こうげきが とても よわい
-  special: { atk: -1, def: 4, timeMult: 1.0, critBonus: 0, pointMult: 1.4 },
+  special: { atk: -1, def: 4, timeMult: 1.0, pointMult: 1.4 },
 };
 
 const STAGE_DEFS = {
@@ -230,7 +230,11 @@ const BOSSES = [
 ];
 
 // 会心の一撃: このわりあいの じかん内に こたえると はつどう
-const CRIT_WINDOW = 0.15;
+// 会心の一撃は じかんが のびても きびしさが かわらないよう
+// 「なんびょう いないか」で はんていする
+const CRIT_MS = { 1: 1350, 2: 1150, 3: 1000 };
+// どうぐや みちで ひろがる ぶん(ミリびょう)
+const CRIT_BONUS_MS = { feather: 700, gekkopika: 500 };
 // 会心の一撃の ダメージばいりつ
 const CRIT_MULTIPLIER = 1.5;
 
@@ -430,6 +434,18 @@ const ACHIEVEMENTS = [
     check: (r) => r.bestFloor >= 5 },
   { id: "tower15", emoji: "🌟", name: "タワー 15かい", desc: "エンドレスタワーで 15かいまで のぼる",
     check: (r) => r.bestFloor >= 15 },
+  // なんいど
+  { id: "hard50", emoji: "🔥", name: "むずかしいに ちょうせん", desc: "むずかしいモードで 50もん せいかい",
+    check: (r) => (r.hardCorrect || 0) >= 50 },
+  { id: "hard300", emoji: "🌋", name: "むずかしいの じょうれんきゃく", desc: "むずかしいモードで 300もん せいかい",
+    check: (r) => (r.hardCorrect || 0) >= 300 },
+  { id: "hardboss10", emoji: "⚡", name: "ごうかの ボスハンター", desc: "むずかしいモードで ボスを 10たい たおす",
+    check: (r) => (r.hardBoss || 0) >= 10 },
+  { id: "hardperfect", emoji: "🏵️", name: "かんぺきな いちせん", desc: "むずかしいモードで ノーミスクリア 5かい",
+    check: (r) => (r.hardPerfect || 0) >= 5 },
+  { id: "hard6th", emoji: "🎓", name: "さいなんかんへの ちょうせん", desc: "6年生 × むずかしいで 100もん せいかい",
+    check: (r) => (r.gradeCorrect?.[6] || 0) >= 100 && (r.hardCorrect || 0) >= 100 },
+
   // つづける ちから
   { id: "days3", emoji: "📅", name: "3日 つづけた", desc: "3日 れんぞくで あそぶ",
     check: (r) => (r.bestStreakDays || 0) >= 3 },
@@ -535,7 +551,6 @@ function statsFor(owned, branch) {
     atk: 0,
     def: 0,
     timeMult: 1,
-    critBonus: 0,
     pointMult: 1,
   };
   const has = (id) => owned.includes(id);
@@ -550,20 +565,34 @@ function statsFor(owned, branch) {
     streakBonus: has("boots") ? 1 : 0,
     pointMult: (has("coin") ? 1.5 : 1) * bb.pointMult,
     thresholdMult: has("crystal") ? 0.75 : 1,
-    critWindow: CRIT_WINDOW + (has("feather") ? 0.08 : 0) + bb.critBonus,
+    critExtraMs:
+      (has("feather") ? CRIT_BONUS_MS.feather : 0) +
+      (branch === "gekkopika" ? CRIT_BONUS_MS.gekkopika : 0),
     bonusHp: has("heart") ? 20 : 0,
     timeMult: bb.timeMult,
   };
 }
 
 const DIFFICULTIES = [
-  { id: "easy", label: "かんたん", emoji: "🌱", desc: "ゆっくり むずかしくなる" },
+  { id: "easy", label: "かんたん", emoji: "🌱", desc: "ゆっくり むずかしくなる ・ じかん ながめ" },
   { id: "normal", label: "ふつう", emoji: "⚖️", desc: "バランスよく" },
-  { id: "hard", label: "むずかしい", emoji: "🔥", desc: "はやく むずかしくなる" },
+  { id: "hard", label: "むずかしい", emoji: "🔥", desc: "はやく むずかしくなる ・ じかん みじかめ" },
 ];
 
 // ステージ何個ごとにレベルが1段階上がるか(数字が小さいほど早く難しくなる)
 const STAGES_PER_LEVEL = { easy: 4, normal: 3, hard: 2 };
+
+// なんいどに おうじた ほうしゅう
+const DIFF_REWARD = { easy: 0.8, normal: 1.0, hard: 1.4 };
+// むずかしいほど かんがえる じかんも みじかい
+const DIFF_TIME = { easy: 1.2, normal: 1.0, hard: 0.85 };
+
+function diffReward(d) {
+  return DIFF_REWARD[d] || 1;
+}
+function diffTime(d) {
+  return DIFF_TIME[d] || 1;
+}
 
 // 出題モード
 // きょうか
@@ -723,7 +752,7 @@ function computeLevel(stageNumber, difficulty, recentResults) {
 }
 
 function getTimeLimit(level) {
-  return level === 1 ? 9000 : level === 2 ? 7500 : 6500;
+  return level === 1 ? 14000 : level === 2 ? 12000 : 10500;
 }
 
 // ---------- しゃかい: 47とどうふけん ----------
@@ -2079,6 +2108,11 @@ function MathMonsterBattle() {
     seenBranches: [],
     finishedRoutes: [],
     reachedFinal: false,
+    hardCorrect: 0,    // むずかしいモードでの せいかいすう
+    hardBoss: 0,       // むずかしいモードで たおした ボス
+    hardPerfect: 0,    // むずかしいモードの ノーミスクリア
+    seenStages: [],    // いままでに なった すがた(てんせいしても のこる)
+    seenEnemies: [],   // いままでに であった てき
     playDays: [],      // あそんだ ひづけ
     bestStreakDays: 0, // さいこう れんぞく日すう
     perfectStages: 0,  // ノーミスで クリアした ステージ
@@ -2171,7 +2205,7 @@ function MathMonsterBattle() {
     const stageMult = towerMode
       ? stageTimeFactor(towerFloor * BOSS_INTERVAL, true)
       : stageTimeFactor(stageNumber, isBossStage(stageNumber));
-    return Math.round(base * branchMult * stageMult * timeMultFor(mode));
+    return Math.round(base * branchMult * stageMult * timeMultFor(mode) * diffTime(difficulty));
   };
   const thresholdFor = (st) => Math.ceil(st.threshold * stats.thresholdMult);
 
@@ -2250,7 +2284,8 @@ function MathMonsterBattle() {
             built.timeLimit *
               ((BRANCH_BONUS[data.branch] && BRANCH_BONUS[data.branch].timeMult) || 1) *
               stageTimeFactor(data.stageNumber ?? 1, isBossStage(data.stageNumber ?? 1)) *
-              timeMultFor(loadedMode)
+              timeMultFor(loadedMode) *
+              diffTime(data.difficulty ?? "normal")
           );
           setTimeLimit(loadedLim);
           setCurrentLevel(built.level);
@@ -2388,6 +2423,11 @@ function MathMonsterBattle() {
       seenBranches: [],
       finishedRoutes: [],
       reachedFinal: false,
+      hardCorrect: 0,
+      hardBoss: 0,
+      hardPerfect: 0,
+      seenStages: [],
+      seenEnemies: [],
       playDays: [],
       bestStreakDays: 0,
       perfectStages: 0,
@@ -2511,7 +2551,7 @@ function MathMonsterBattle() {
   }
 
   // せいかい/まちがいを きろくする(ダッシュボードよう)
-  function recordAnswer(correct, prob, curMode) {
+  function recordAnswer(correct, prob, curMode, curDiff) {
     const day = todayKey();
     setRecords((r) => {
       const next = { ...r };
@@ -2534,6 +2574,7 @@ function MathMonsterBattle() {
       next.daily = d;
 
       if (!correct) next.totalWrong = (r.totalWrong || 0) + 1;
+      if (correct && curDiff === "hard") next.hardCorrect = (r.hardCorrect || 0) + 1;
 
       // 学年ごと
       if (curMode && curMode.startsWith("grade-")) {
@@ -2564,7 +2605,8 @@ function MathMonsterBattle() {
     if (feedback || stageClear || evolveEvent || branchPrompt || eggPrompt) return;
     const elapsed = timeLimit - remainingRef.current;
     const isCorrect = forcedType !== "timeout" && choice === problem.answer;
-    const isCritical = isCorrect && elapsed <= timeLimit * stats.critWindow;
+    const critLimit = (CRIT_MS[currentLevel] || CRIT_MS[1]) + stats.critExtraMs;
+    const isCritical = isCorrect && elapsed <= critLimit;
 
     recentResultsRef.current = [...recentResultsRef.current, isCorrect].slice(-6);
 
@@ -2572,7 +2614,7 @@ function MathMonsterBattle() {
       const baseGain = 1 + Math.min(2, Math.floor(streak / 3)) + streakBonus;
       const raw = isCritical ? baseGain + 1 : baseGain;
       // はんぱを もちこして、ばいりつが きちんと きくようにする
-      const exact = raw * stats.pointMult * rewardMult(mode) + pointFracRef.current;
+      const exact = raw * stats.pointMult * rewardMult(mode) * diffReward(difficulty) + pointFracRef.current;
       const gained = Math.floor(exact);
       pointFracRef.current = exact - gained;
       const dmg = isCritical ? Math.round(atk * CRIT_MULTIPLIER) : atk;
@@ -2587,17 +2629,17 @@ function MathMonsterBattle() {
       });
       setPoints((p) => p + gained);
       setCorrectCount((c) => c + 1);
-      const exactExp = EXP_PER_CORRECT * rewardMult(mode) + expFracRef.current;
+      const exactExp = EXP_PER_CORRECT * rewardMult(mode) * diffReward(difficulty) + expFracRef.current;
       const gainedExp = Math.floor(exactExp);
       expFracRef.current = exactExp - gainedExp;
       if (gainedExp > 0) setExp((e) => e + gainedExp);
       if (isCritical) setRecords((r) => ({ ...r, critCount: r.critCount + 1 }));
-      recordAnswer(true, problem, mode);
+      recordAnswer(true, problem, mode, difficulty);
       setEnemyHp((hp) => Math.max(0, hp - dmg));
     } else {
       const type = forcedType === "timeout" ? "timeout" : "wrong";
       if (type === "timeout") setRecords((r) => ({ ...r, timeoutCount: (r.timeoutCount || 0) + 1 }));
-      recordAnswer(false, problem, mode);
+      recordAnswer(false, problem, mode, difficulty);
       stageWrongRef.current += 1;
       const dmg = applyEnemyAttack();
       setFeedback({ type });
@@ -2630,18 +2672,20 @@ function MathMonsterBattle() {
         const beaten = currentEnemy();
         const elapsed = Date.now() - stageStartTime.current;
         const bonus = timeBonusFor(elapsed, beaten.isBoss);
-        const bonusScaled = Math.round(bonus * rewardMult(mode));
+        const bonusScaled = Math.round(bonus * rewardMult(mode) * diffReward(difficulty));
         if (bonusScaled > 0) setPoints((pt) => pt + bonusScaled);
         // ノーミスで クリアできたか / いちばん はやい タイム
         const noMiss = stageWrongRef.current === 0;
         setRecords((r) => ({
           ...r,
           perfectStages: (r.perfectStages || 0) + (noMiss ? 1 : 0),
+          hardPerfect: (r.hardPerfect || 0) + (noMiss && difficulty === "hard" ? 1 : 0),
+          hardBoss: (r.hardBoss || 0) + (beaten.isBoss && difficulty === "hard" ? 1 : 0),
           bestStageTime:
             !r.bestStageTime || elapsed < r.bestStageTime ? elapsed : r.bestStageTime,
         }));
         const gainedExp = Math.round(
-          (beaten.isBoss ? EXP_PER_BOSS : EXP_PER_STAGE) * rewardMult(mode)
+          (beaten.isBoss ? EXP_PER_BOSS : EXP_PER_STAGE) * rewardMult(mode) * diffReward(difficulty)
         );
         setExp((e) => e + gainedExp);
         if (beaten.isBoss) {
@@ -2856,6 +2900,18 @@ function MathMonsterBattle() {
     }));
   }
 
+  // いまの すがたを ずかんに のこす(てんせいしても きえない)
+  useEffect(() => {
+    if (!loaded) return;
+    const id = stage.id;
+    setRecords((r) =>
+      (r.seenStages || []).includes(id)
+        ? r
+        : { ...r, seenStages: [...(r.seenStages || []), id] }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage.id, loaded]);
+
   // 進化演出のフェーズ進行(ぶるぶる → まぶしい光 → お披露目)
   useEffect(() => {
     if (evolveEvent?.phase === "shake") {
@@ -2916,6 +2972,19 @@ function MathMonsterBattle() {
 
   const enemy = currentEnemy();
   const enemyMaxHp = enemy.hp;
+
+  // であった てきも のこす
+  useEffect(() => {
+    if (!loaded || screen !== "game") return;
+    const nm = enemy.name;
+    setRecords((r) =>
+      (r.seenEnemies || []).includes(nm)
+        ? r
+        : { ...r, seenEnemies: [...(r.seenEnemies || []), nm] }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enemy.name, loaded, screen]);
+
 
   if (!loaded) {
     return (
@@ -3289,7 +3358,7 @@ function MathMonsterBattle() {
     const built = buildProblemState(BOSS_INTERVAL, difficulty, [], mode, selectedTables);
     setProblem(built.problem);
     setChoices(built.choices);
-    const lim = Math.round(built.timeLimit * ((BRANCH_BONUS[branch] && BRANCH_BONUS[branch].timeMult) || 1) * stageTimeFactor(BOSS_INTERVAL, true) * timeMultFor(mode));
+    const lim = Math.round(built.timeLimit * ((BRANCH_BONUS[branch] && BRANCH_BONUS[branch].timeMult) || 1) * stageTimeFactor(BOSS_INTERVAL, true) * timeMultFor(mode) * diffTime(difficulty));
     setTimeLimit(lim);
     remainingRef.current = lim;
     setCurrentLevel(built.level);
@@ -3910,6 +3979,22 @@ function MathMonsterBattle() {
           </div>
           <div style={styles.difficultyDesc}>
             {DIFFICULTIES.find((d) => d.id === difficulty)?.desc}
+            <span style={styles.rewardTag}>
+              ポイント・けいけんち ×{diffReward(difficulty)}
+            </span>
+          </div>
+          <div style={styles.diffRewardRow}>
+            {DIFFICULTIES.map((d) => (
+              <span
+                key={d.id}
+                style={{
+                  ...styles.gradeRewardCell,
+                  color: difficulty === d.id ? "#FFD23F" : "#6F6A9C",
+                }}
+              >
+                ×{DIFF_REWARD[d.id]}
+              </span>
+            ))}
           </div>
 
           <button className="start-btn" onClick={handleStart} style={styles.startBtn}>
@@ -4310,9 +4395,10 @@ function MathMonsterBattle() {
               {mode === "addsub"
                 ? `${DIFFICULTIES.find((d) => d.id === difficulty)?.emoji} Lv.${currentLevel}`
                 : `${modeLabel(mode, selectedTables)}`}
-              {rewardMult(mode) > 1 && (
-                <span style={styles.rewardBadge}>×{rewardMult(mode)}</span>
-              )}
+              {(() => {
+                const total = Math.round(rewardMult(mode) * diffReward(difficulty) * 100) / 100;
+                return total !== 1 ? <span style={styles.rewardBadge}>×{total}</span> : null;
+              })()}
             </span>
           </div>
           {/* たたかいの ばめん */}
@@ -4444,7 +4530,15 @@ function MathMonsterBattle() {
                   timeLeftRatio > 0.6 ? "#4AC9FF" : timeLeftRatio > 0.3 ? "#FFD23F" : "#FF6B4A",
               }}
             />
-            <div style={styles.critZoneMark} />
+            <div
+              style={{
+                ...styles.critZoneMark,
+                left: `${Math.max(
+                  0,
+                  Math.min(100, 100 - (((CRIT_MS[currentLevel] || CRIT_MS[1]) + stats.critExtraMs) / timeLimit) * 100)
+                )}%`,
+              }}
+            />
           </div>
           <div style={styles.timerCaption}>⚡ はやく こたえると 会心の一撃!</div>
 
@@ -4653,7 +4747,10 @@ function MathMonsterBattle() {
           <div style={styles.shopGroupLabel}>🐣 なかま</div>
           {[...BRANCHES, SPECIAL_BRANCH].map((b) => {
             // とくべつルートは 解放するまで 1ぎょうだけ みせる
-            if (b.id === "special" && !specialUnlocked && branch !== "special") {
+            const everSeenSpecial = BRANCH_PATHS.special.some((id) =>
+              (records.seenStages || []).includes(id)
+            );
+            if (b.id === "special" && !specialUnlocked && branch !== "special" && !everSeenSpecial) {
               const done = (records.finishedRoutes || []).filter((x) =>
                 ["surikara", "gekkopika"].includes(x)
               ).length;
@@ -4683,9 +4780,11 @@ function MathMonsterBattle() {
                 <div style={styles.dexList}>
                   {path.map((id) => {
                     const st = { id, ...STAGE_DEFS[id] };
+                    // いちど なった すがたは てんせいしても のこる
                     const unlocked =
-                      (branch === b.id || id === "egg" || (b.id !== "special" && id === "nokosuko")) &&
-                      exp >= thresholdFor(st);
+                      (records.seenStages || []).includes(id) ||
+                      ((branch === b.id || id === "egg" || (b.id !== "special" && id === "nokosuko")) &&
+                        exp >= thresholdFor(st));
                     return (
                       <div
                         key={id}
@@ -4869,7 +4968,9 @@ function MathMonsterBattle() {
           <div style={styles.shopGroupLabel}>👑 ボス</div>
           <div style={styles.dexList}>
             {BOSSES.map((e, i) => {
-              const unlocked = stageNumber >= (i + 1) * BOSS_INTERVAL;
+              const unlocked =
+                (records.seenEnemies || []).includes(e.name) ||
+                stageNumber >= (i + 1) * BOSS_INTERVAL;
               return (
                 <div
                   key={e.name}
@@ -5291,6 +5392,14 @@ const styles = {
     padding: "0 5px",
     fontSize: 10,
     fontWeight: 800,
+  },
+  diffRewardRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: 4,
+    width: "100%",
+    maxWidth: 268,
+    marginBottom: 4,
   },
   gradeRewardRow: {
     display: "grid",
@@ -6526,7 +6635,7 @@ const styles = {
   },
   critZoneMark: {
     position: "absolute",
-    left: "85%",
+    left: "85%", // じっさいは その場で けいさんして うわがきする
     top: 0,
     bottom: 0,
     width: 2,
