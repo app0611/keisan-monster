@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20260828-093554";
+var APP_VERSION = "20260909-130329";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -2335,6 +2335,10 @@ function MathMonsterBattle() {
           else if (typeof data.correctCount === "number") setExp(data.correctCount); // ふるいセーブの ひきつぎ
           if (data.rebirth) setRebirth(data.rebirth);
           if (data.bestFloor) setBestFloor(data.bestFloor);
+          if (data.towerMode) {
+            setTowerMode(true);
+            setTowerFloor(data.towerFloor || 1);
+          }
           if (data.records) setRecords((r) => ({ ...r, ...data.records }));
           if (data.myMonsters) setMyMonsters(data.myMonsters);
           if (data.skinId) setSkinId(data.skinId);
@@ -2406,6 +2410,8 @@ function MathMonsterBattle() {
             exp,
             rebirth,
             bestFloor,
+            towerMode,
+            towerFloor,
             records,
             myMonsters,
             skinId,
@@ -2444,6 +2450,8 @@ function MathMonsterBattle() {
     exp,
     rebirth,
     bestFloor,
+    towerMode,
+    towerFloor,
     records,
     myMonsters,
     skinId,
@@ -3448,6 +3456,56 @@ function MathMonsterBattle() {
     setScreen("game");
   }
 
+  // タワーを ちゅうだんする(かいは のこして あとで つづきから)
+  function pauseTower() {
+    setBestFloor((b) => Math.max(b, towerFloor - 1));
+    setStageClear(null);
+    setScreen("start");
+    setItemToast(`🗼 ${towerFloor}かいで ちゅうだん。あとで つづけられるよ`);
+  }
+
+  // タワーを やめて ふつうの ぼうけんに もどる
+  function quitTower() {
+    setBestFloor((b) => Math.max(b, towerFloor - 1));
+    setTowerMode(false);
+    setTowerFloor(1);
+    setStageClear(null);
+    setPlayerHp(maxHp);
+    setEnemyHp(enemyForStage(stageNumber).hp);
+    stageStartPoints.current = points;
+    stageStartTime.current = Date.now();
+    stageWrongRef.current = 0;
+    setScreen("start");
+    setItemToast("ふつうの ぼうけんに もどった");
+  }
+
+  // タワーの つづきから
+  function resumeTower() {
+    setTowerResult(null);
+    setStageClear(null);
+    setTab("battle");
+    stageStartPoints.current = points;
+    stageStartTime.current = Date.now();
+    stageWrongRef.current = 0;
+    recentResultsRef.current = [];
+    const built = buildProblemState(towerFloor * BOSS_INTERVAL, difficulty, [], mode, selectedTables);
+    setProblem(built.problem);
+    setChoices(built.choices);
+    const lim = Math.round(
+      built.timeLimit *
+        ((BRANCH_BONUS[branch] && BRANCH_BONUS[branch].timeMult) || 1) *
+        stageTimeFactor(BOSS_INTERVAL, true) *
+        timeMultFor(mode) *
+        diffTime(difficulty)
+    );
+    setTimeLimit(lim);
+    remainingRef.current = lim;
+    setCurrentLevel(built.level);
+    setTimeLeftRatio(1);
+    answeredRef.current = false;
+    setScreen("game");
+  }
+
   // てんせい: そうびと ポイントは のこして さいしょから
   function doRebirth() {
     setRebirth((n) => n + 1);
@@ -4105,9 +4163,25 @@ function MathMonsterBattle() {
           {/* エンドレスタワー */}
           {towerUnlocked && (
             <div style={styles.towerBox}>
-              <button onClick={startTower} style={styles.towerBtn}>
-                🗼 エンドレスタワーに いどむ
-              </button>
+              {towerMode ? (
+                <>
+                  <button onClick={resumeTower} style={styles.towerBtn}>
+                    🗼 タワー {towerFloor}かいから つづける
+                  </button>
+                  <div style={styles.towerSubRow}>
+                    <button onClick={startTower} style={styles.towerSmallBtn}>
+                      1かいから やりなおす
+                    </button>
+                    <button onClick={quitTower} style={styles.towerSmallBtn}>
+                      タワーを やめる
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button onClick={startTower} style={styles.towerBtn}>
+                  🗼 エンドレスタワーに いどむ
+                </button>
+              )}
               <div style={styles.towerBest}>
                 さいこう きろく: {bestFloor > 0 ? `${bestFloor}かい` : "まだ なし"}
               </div>
@@ -4493,6 +4567,11 @@ function MathMonsterBattle() {
           <button onClick={proceedToNextStage} style={styles.clearNextBtn}>
             {towerMode ? "つぎの かいへ ▶" : "つぎのステージへ ▶"}
           </button>
+          {towerMode && (
+            <button onClick={pauseTower} style={styles.clearPauseBtn}>
+              きょうは ここまで
+            </button>
+          )}
         </div>
       )}
 
@@ -4503,6 +4582,11 @@ function MathMonsterBattle() {
             <span style={styles.stageLabel}>
               {towerMode ? `🗼 タワー ${towerFloor}かい` : `ステージ ${stageNumber}`}
               {enemy.isBoss && !towerMode && <span style={styles.bossTag}>👑 ボス</span>}
+              {towerMode && (
+                <button onClick={pauseTower} style={styles.pauseBtn}>
+                  ⏸ ちゅうだん
+                </button>
+              )}
             </span>
             <span style={styles.levelBadge}>
               {mode === "addsub"
@@ -6110,6 +6194,39 @@ const styles = {
     color: "#FFD23F",
     fontSize: 12,
     fontWeight: 700,
+    cursor: "pointer",
+  },
+  pauseBtn: {
+    marginLeft: 8,
+    background: "#22204A",
+    border: "1px solid #4A4580",
+    borderRadius: 10,
+    padding: "2px 8px",
+    color: "#B8B3E0",
+    fontSize: 10,
+    cursor: "pointer",
+  },
+  clearPauseBtn: {
+    marginTop: 8,
+    background: "transparent",
+    border: "1px solid #4A4580",
+    borderRadius: 18,
+    padding: "7px 18px",
+    color: "#8A85B8",
+    fontSize: 11.5,
+    cursor: "pointer",
+  },
+  towerSubRow: {
+    display: "flex",
+    gap: 8,
+  },
+  towerSmallBtn: {
+    background: "transparent",
+    border: "1px solid #4A4580",
+    borderRadius: 12,
+    padding: "5px 12px",
+    color: "#8A85B8",
+    fontSize: 10.5,
     cursor: "pointer",
   },
   towerBest: {
