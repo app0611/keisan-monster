@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20260911-212217";
+var APP_VERSION = "20260911-213309";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -469,6 +469,29 @@ const ACHIEVEMENTS = [
     check: (r) => Object.values(r.kukuFast || {}).reduce((a, b) => a + b, 0) >= 300 },
   { id: "kuku500", emoji: "📕", name: "九九 500もん", desc: "九九で つうさん 500もん せいかい",
     check: (r) => Object.values(r.tableCorrect || {}).reduce((a, b) => a + b, 0) >= 500 },
+  // ---- インドしき 19×19 ----
+  { id: "india100", emoji: "🇮🇳", name: "19×19 にゅうもん", desc: "19×19で 100もん せいかい",
+    check: (r) => Object.values(r.indiaCorrect || {}).reduce((a, b) => a + b, 0) >= 100 },
+  { id: "indiaSquare", emoji: "⏹️", name: "2じょう マスター", desc: "11×11〜19×19の 2じょうを 50もん せいかい",
+    check: (r) => (r.indiaSquare || 0) >= 50 },
+  ...[11, 12, 13, 14, 15, 16, 17, 18, 19].map((n) => ({
+    id: `india${n}`,
+    emoji: "✖️",
+    name: `${n}のだん マスター`,
+    desc: `${n}のだんで 20もん せいかい・せいとうりつ 85%いじょう`,
+    check: (r) => {
+      const c = r.indiaCorrect?.[n] || 0;
+      const w = r.indiaWrong?.[n] || 0;
+      return c >= 20 && c / Math.max(1, c + w) >= 0.85;
+    },
+  })),
+  { id: "indiaAll", emoji: "👑", name: "19×19 かんぜん せいは", desc: "11〜19の ぜんぶの だんを マスター",
+    check: (r) =>
+      [11,12,13,14,15,16,17,18,19].every((n) => {
+        const c = r.indiaCorrect?.[n] || 0;
+        const w = r.indiaWrong?.[n] || 0;
+        return c >= 20 && c / Math.max(1, c + w) >= 0.85;
+      }) },
   { id: "kukuHard", emoji: "🔥", name: "九九を むずかしいで", desc: "むずかしいモードの 九九で 100もん せいかい",
     check: (r) =>
       (r.hardCorrect || 0) >= 100 &&
@@ -651,9 +674,18 @@ function diffTime(d) {
 }
 
 // 出題モード
+// インドしき 19×19
+const INDIA_MODES = [
+  { id: "india-11-15", label: "11〜15のだん", emoji: "1️⃣", desc: "まずは ここから" },
+  { id: "india-16-19", label: "16〜19のだん", emoji: "2️⃣", desc: "むずかしい だん" },
+  { id: "india-square", label: "2じょう", emoji: "⏹️", desc: "11×11 〜 19×19" },
+  { id: "india-all", label: "11〜19 ぜんぶ", emoji: "🎲", desc: "すべての だんから" },
+];
+
 // きょうか
 const SUBJECTS = [
   { id: "math", label: "さんすう", emoji: "🔢" },
+  { id: "india", label: "19×19", emoji: "🇮🇳" },
   { id: "social", label: "しゃかい", emoji: "🗾" },
 ];
 
@@ -687,6 +719,10 @@ const MODE_REWARD = {
   "social-pref": 1.5,
   "social-region": 1.2,
   "social-mix": 1.6,
+  "india-11-15": 1.8,
+  "india-16-19": 2.2,
+  "india-square": 2.0,
+  "india-all": 2.5,
 };
 
 // むずかしい もんだいほど かんがえる じかんを ながくする
@@ -704,6 +740,10 @@ const MODE_TIME = {
   "social-pref": 1.6,
   "social-region": 1.3,
   "social-mix": 1.6,
+  "india-11-15": 1.3,
+  "india-16-19": 1.4,
+  "india-square": 1.2,
+  "india-all": 1.5,
 };
 
 function timeMultFor(mode) {
@@ -728,6 +768,10 @@ const GRADES = [
 ];
 
 function modeLabel(mode, selectedTables) {
+  if (mode && mode.startsWith("india-")) {
+    const m = INDIA_MODES.find((x) => x.id === mode);
+    return m ? m.label : "19×19";
+  }
   if (mode && mode.startsWith("social-")) {
     const m = SOCIAL_MODES.find((x) => x.id === mode);
     return m ? m.label : "しゃかい";
@@ -1195,7 +1239,50 @@ function makeGradeProblem(grade) {
   };
 }
 
+// インドしき: 11〜19の かけざん
+function makeIndiaProblem(kind) {
+  let a, b;
+  if (kind === "square") {
+    a = rnd(11, 19);
+    b = a;
+  } else if (kind === "11-15") {
+    a = rnd(11, 15);
+    b = rnd(2, 19);
+  } else if (kind === "16-19") {
+    a = rnd(16, 19);
+    b = rnd(2, 19);
+  } else {
+    a = rnd(11, 19);
+    b = rnd(11, 19);
+  }
+  const ans = a * b;
+  return {
+    text: `${a} × ${b}`,
+    answer: String(ans),
+    // まちがえやすい こたえを ならべる
+    distractors: [
+      a * (b + 1),
+      a * (b - 1),
+      (a + 1) * b,
+      (a - 1) * b,
+      ans + 10,
+      ans - 10,
+      ans + a,
+      ans - b,
+    ]
+      .filter((v) => v > 0 && v !== ans)
+      .map(String),
+  };
+}
+
 function makeProblem(level, mode, selectedTables) {
+  // インドしき 19×19
+  if (mode && mode.startsWith("india-")) {
+    const kind = mode.replace("india-", "");
+    const ip = makeIndiaProblem(kind);
+    return { text: ip.text, answer: ip.answer, distractors: ip.distractors, kind: "india" };
+  }
+
   // しゃかい(とどうふけん)
   if (mode && mode.startsWith("social-")) {
     const kind = mode.split("-")[1];
@@ -2274,6 +2361,9 @@ function MathMonsterBattle() {
     tableStreak: {},     // だんごとの いまの れんぞくせいかい
     tableBestStreak: {}, // だんごとの さいこう れんぞく
     kukuFast: {},        // だんごとに 2びょういないで こたえた かず
+    indiaCorrect: {},    // 19×19の だんごと せいかい
+    indiaWrong: {},
+    indiaSquare: 0,      // 2じょうの せいかい
     gradeCorrect: {},
     gradeWrong: {},
     daily: {}, // { "2026-8-22": { correct: 12, wrong: 3 } }
@@ -2396,6 +2486,10 @@ function MathMonsterBattle() {
   // 2つの みちを どちらも さいごまで みた人だけ
   // イリスの みちは どれか 1つの ルートを クリアすると あらわれる
   const irisUnlocked = (records.finishedRoutes || []).length >= 1;
+  // 19×19は 九九の ぜんだんを 10もんずつ せいかいすると あそべる
+  const indiaUnlocked = [1, 2, 3, 4, 5, 6, 7, 8, 9].every(
+    (n) => (records.tableCorrect?.[n] || 0) >= 10
+  );
   const specialUnlocked =
     (records.finishedRoutes || []).includes("surikara") &&
     (records.finishedRoutes || []).includes("gekkopika");
@@ -2602,6 +2696,9 @@ function MathMonsterBattle() {
       tableStreak: {},
       tableBestStreak: {},
       kukuFast: {},
+      indiaCorrect: {},
+      indiaWrong: {},
+      indiaSquare: 0,
       gradeCorrect: {},
       gradeWrong: {},
       daily: {},
@@ -2771,6 +2868,16 @@ function MathMonsterBattle() {
           const key = correct ? "gradeCorrect" : "gradeWrong";
           next[key] = { ...(r[key] || {}), [g]: ((r[key] || {})[g] || 0) + 1 };
         }
+      }
+      // インドしき 19×19
+      if (curMode && curMode.startsWith("india-") && prob && prob.text) {
+        const a = parseInt(prob.text.split("×")[0].trim(), 10);
+        const b2 = parseInt(prob.text.split("×")[1].trim(), 10);
+        if (a >= 11 && a <= 19) {
+          const key = correct ? "indiaCorrect" : "indiaWrong";
+          next[key] = { ...(r[key] || {}), [a]: ((r[key] || {})[a] || 0) + 1 };
+        }
+        if (correct && a === b2) next.indiaSquare = (r.indiaSquare || 0) + 1;
       }
       // しゃかい
       if (curMode && curMode.startsWith("social-")) {
@@ -4010,24 +4117,66 @@ function MathMonsterBattle() {
           <div style={styles.difficultyRow}>
             {SUBJECTS.map((sub) => {
               const active =
-                sub.id === "social" ? mode.startsWith("social-") : !mode.startsWith("social-");
+                sub.id === "social"
+                  ? mode.startsWith("social-")
+                  : sub.id === "india"
+                  ? mode.startsWith("india-")
+                  : !mode.startsWith("social-") && !mode.startsWith("india-");
+              const locked = sub.id === "india" && !indiaUnlocked;
               return (
                 <button
                   key={sub.id}
-                  onClick={() => setMode(sub.id === "social" ? "social-mix" : "addsub")}
+                  disabled={locked}
+                  onClick={() =>
+                    setMode(
+                      sub.id === "social"
+                        ? "social-mix"
+                        : sub.id === "india"
+                        ? "india-11-15"
+                        : "addsub"
+                    )
+                  }
                   style={{
                     ...styles.difficultyBtn,
                     ...(active ? styles.difficultyBtnActive : {}),
-                    minWidth: 92,
+                    minWidth: 84,
+                    opacity: locked ? 0.45 : 1,
                   }}
                 >
-                  <div style={{ fontSize: 20 }}>{sub.emoji}</div>
-                  <div style={{ fontSize: 12, fontWeight: 700 }}>{sub.label}</div>
+                  <div style={{ fontSize: 20 }}>{locked ? "🔒" : sub.emoji}</div>
+                  <div style={{ fontSize: 11, fontWeight: 700 }}>{sub.label}</div>
                 </button>
               );
             })}
           </div>
           <div style={{ height: 12 }} />
+
+          {/* 19×19の もんだい */}
+          {mode.startsWith("india-") && (
+            <>
+              <div style={styles.difficultyLabel}>インドしき 19×19</div>
+              <div style={styles.socialRow}>
+                {INDIA_MODES.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setMode(m.id)}
+                    style={{
+                      ...styles.socialBtn,
+                      ...(mode === m.id ? styles.difficultyBtnActive : {}),
+                    }}
+                  >
+                    <span style={{ fontSize: 15 }}>{m.emoji}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700 }}>{m.label}</span>
+                  </button>
+                ))}
+              </div>
+              <div style={styles.difficultyDesc}>
+                {INDIA_MODES.find((m) => m.id === mode)?.desc}
+                <span style={styles.rewardTag}>ポイント・けいけんち ×{rewardMult(mode)}</span>
+              </div>
+              <div style={{ height: 10 }} />
+            </>
+          )}
 
           {/* しゃかいの もんだい */}
           {mode.startsWith("social-") && (
@@ -4057,7 +4206,7 @@ function MathMonsterBattle() {
           )}
 
           {/* もんだいの しゅるい */}
-          {!mode.startsWith("social-") && (
+          {!mode.startsWith("social-") && !mode.startsWith("india-") && (
           <>
           <div style={styles.difficultyLabel}>もんだい</div>
           <div style={styles.difficultyRow}>
