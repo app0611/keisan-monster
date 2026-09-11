@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20260909-130329";
+var APP_VERSION = "20260911-212217";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -438,8 +438,41 @@ const ACHIEVEMENTS = [
     check: (r) => r.maxStreak >= 20 },
   { id: "crit50", emoji: "⚡", name: "かいしんの たつじん", desc: "会心の一撃を 50かい だす",
     check: (r) => r.critCount >= 50 },
+  // ---- 九九 ----
   { id: "kuku", emoji: "✖️", name: "九九 ぜんだん せいは", desc: "1〜9のだんを それぞれ 10もん せいかい",
     check: (r) => [1,2,3,4,5,6,7,8,9].every((n) => (r.tableCorrect?.[n] || 0) >= 10) },
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({
+    id: `dan${n}`,
+    emoji: ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣"][n - 1],
+    name: `${n}のだん マスター`,
+    desc: `${n}のだんで 20もん せいかい・せいとうりつ 90%いじょう`,
+    check: (r) => {
+      const c = r.tableCorrect?.[n] || 0;
+      const w = r.tableWrong?.[n] || 0;
+      return c >= 20 && c / Math.max(1, c + w) >= 0.9;
+    },
+  })),
+  { id: "kukuPerfect", emoji: "🏆", name: "九九 かんぺき", desc: "ぜんぶの だんで せいとうりつ 90%いじょう(かく20もん)",
+    check: (r) =>
+      [1,2,3,4,5,6,7,8,9].every((n) => {
+        const c = r.tableCorrect?.[n] || 0;
+        const w = r.tableWrong?.[n] || 0;
+        return c >= 20 && c / Math.max(1, c + w) >= 0.9;
+      }) },
+  { id: "kukuStreak20", emoji: "🔗", name: "九九 20れんぞく", desc: "おなじ だんで 20もん れんぞく せいかい",
+    check: (r) => Object.values(r.tableBestStreak || {}).some((v) => v >= 20) },
+  { id: "kukuStreakAll", emoji: "⛓️", name: "ぜんだん 10れんぞく", desc: "ぜんぶの だんで 10もん れんぞく せいかい",
+    check: (r) => [1,2,3,4,5,6,7,8,9].every((n) => (r.tableBestStreak?.[n] || 0) >= 10) },
+  { id: "kukuFast50", emoji: "⚡", name: "九九 そくとう", desc: "九九を 2びょういないで 50もん せいかい",
+    check: (r) => Object.values(r.kukuFast || {}).reduce((a, b) => a + b, 0) >= 50 },
+  { id: "kukuFast300", emoji: "💫", name: "九九 しゅんさつ", desc: "九九を 2びょういないで 300もん せいかい",
+    check: (r) => Object.values(r.kukuFast || {}).reduce((a, b) => a + b, 0) >= 300 },
+  { id: "kuku500", emoji: "📕", name: "九九 500もん", desc: "九九で つうさん 500もん せいかい",
+    check: (r) => Object.values(r.tableCorrect || {}).reduce((a, b) => a + b, 0) >= 500 },
+  { id: "kukuHard", emoji: "🔥", name: "九九を むずかしいで", desc: "むずかしいモードの 九九で 100もん せいかい",
+    check: (r) =>
+      (r.hardCorrect || 0) >= 100 &&
+      Object.values(r.tableCorrect || {}).reduce((a, b) => a + b, 0) >= 100 },
   { id: "final", emoji: "🪽", name: "さいしゅう しんか", desc: "さいごの すがたに なる",
     check: (r) => r.reachedFinal },
   { id: "rebirth1", emoji: "🔄", name: "てんせい", desc: "1かい てんせいする",
@@ -802,6 +835,57 @@ const PREFS = [
   ["鹿児島県", "鹿児島市", "九州"], ["沖縄県", "那覇市", "九州"],
 ];
 
+// けんちょうしょざいち いがいの おもな 市(まぎらわしい せんたくしに つかう)
+const OTHER_CITIES = {
+  "北海道": ["函館市", "旭川市", "釧路市"],
+  "青森県": ["八戸市", "弘前市"],
+  "岩手県": ["一関市", "花巻市"],
+  "宮城県": ["石巻市", "気仙沼市"],
+  "秋田県": ["横手市", "大館市"],
+  "山形県": ["鶴岡市", "米沢市"],
+  "福島県": ["郡山市", "いわき市", "会津若松市"],
+  "茨城県": ["つくば市", "日立市"],
+  "栃木県": ["足利市", "日光市"],
+  "群馬県": ["高崎市", "桐生市"],
+  "埼玉県": ["川越市", "所沢市", "熊谷市"],
+  "千葉県": ["船橋市", "成田市", "柏市"],
+  "東京都": ["八王子市", "町田市"],
+  "神奈川県": ["川崎市", "鎌倉市", "小田原市"],
+  "新潟県": ["長岡市", "上越市"],
+  "富山県": ["高岡市", "氷見市"],
+  "石川県": ["七尾市", "輪島市"],
+  "福井県": ["敦賀市", "小浜市"],
+  "山梨県": ["富士吉田市", "甲斐市"],
+  "長野県": ["松本市", "上田市"],
+  "岐阜県": ["高山市", "大垣市"],
+  "静岡県": ["浜松市", "富士市", "熱海市"],
+  "愛知県": ["豊田市", "岡崎市", "一宮市"],
+  "三重県": ["四日市市", "伊勢市"],
+  "滋賀県": ["彦根市", "長浜市"],
+  "京都府": ["宇治市", "舞鶴市"],
+  "大阪府": ["堺市", "東大阪市"],
+  "兵庫県": ["姫路市", "西宮市", "尼崎市"],
+  "奈良県": ["橿原市", "生駒市"],
+  "和歌山県": ["田辺市", "新宮市"],
+  "鳥取県": ["米子市", "倉吉市"],
+  "島根県": ["出雲市", "浜田市"],
+  "岡山県": ["倉敷市", "津山市"],
+  "広島県": ["福山市", "尾道市"],
+  "山口県": ["下関市", "宇部市"],
+  "徳島県": ["鳴門市", "阿南市"],
+  "香川県": ["丸亀市", "坂出市"],
+  "愛媛県": ["今治市", "新居浜市"],
+  "高知県": ["四万十市", "南国市"],
+  "福岡県": ["北九州市", "久留米市"],
+  "佐賀県": ["唐津市", "鳥栖市"],
+  "長崎県": ["佐世保市", "諫早市"],
+  "熊本県": ["八代市", "天草市"],
+  "大分県": ["別府市", "中津市"],
+  "宮崎県": ["都城市", "延岡市"],
+  "鹿児島県": ["霧島市", "薩摩川内市"],
+  "沖縄県": ["沖縄市", "浦添市"],
+};
+
 const REGIONS = ["北海道", "東北", "関東", "中部", "近畿", "中国", "四国", "九州"];
 
 // しゃかいの もんだいを つくる
@@ -811,21 +895,30 @@ function makeSocialProblem(kind) {
   const [name, capital, region] = pick(PREFS);
 
   if (k === "capital") {
-    // おなじ ちほうの べつの けんの しょざいちを まぎらわしい こたえに する
-    const same = PREFS.filter((p) => p[2] === region && p[0] !== name).map((p) => p[1]);
+    // まぎらわしい じゅんに: ①おなじ県の べつの市 ②おなじ ちほうの ほかの県の しょざいち
+    const sameP = OTHER_CITIES[name] || [];
+    const sameR = PREFS.filter((p) => p[2] === region && p[0] !== name).map((p) => p[1]);
     const other = PREFS.filter((p) => p[2] !== region).map((p) => p[1]);
+    const mixed = [
+      ...sameP.sort(() => Math.random() - 0.5).slice(0, 2), // おなじ県の市を 1〜2こ
+      ...sameR.sort(() => Math.random() - 0.5),
+      ...other.sort(() => Math.random() - 0.5),
+    ];
     return {
       text: `${name}の けんちょうしょざいちは?`,
       answer: capital,
-      distractors: [...same, ...other].sort(() => Math.random() - 0.5).slice(0, 6),
+      distractors: mixed.slice(0, 6),
     };
   }
 
   if (k === "pref") {
+    // ときどき けんちょうしょざいち いがいの 市からも しゅつだいする
+    const pool = OTHER_CITIES[name] || [];
+    const city = pool.length && Math.random() < 0.4 ? pick(pool) : capital;
     const same = PREFS.filter((p) => p[2] === region && p[0] !== name).map((p) => p[0]);
     const other = PREFS.filter((p) => p[2] !== region).map((p) => p[0]);
     return {
-      text: `${capital}は どこの けん?`,
+      text: `${city}は どこの けん?`,
       answer: name,
       distractors: [...same, ...other].sort(() => Math.random() - 0.5).slice(0, 6),
     };
@@ -2178,6 +2271,9 @@ function MathMonsterBattle() {
     evolveCount: 0,
     tableCorrect: {},
     tableWrong: {},
+    tableStreak: {},     // だんごとの いまの れんぞくせいかい
+    tableBestStreak: {}, // だんごとの さいこう れんぞく
+    kukuFast: {},        // だんごとに 2びょういないで こたえた かず
     gradeCorrect: {},
     gradeWrong: {},
     daily: {}, // { "2026-8-22": { correct: 12, wrong: 3 } }
@@ -2503,6 +2599,9 @@ function MathMonsterBattle() {
       evolveCount: 0,
       tableCorrect: {},
       tableWrong: {},
+      tableStreak: {},
+      tableBestStreak: {},
+      kukuFast: {},
       gradeCorrect: {},
       gradeWrong: {},
       daily: {},
@@ -2640,7 +2739,7 @@ function MathMonsterBattle() {
   }
 
   // せいかい/まちがいを きろくする(ダッシュボードよう)
-  function recordAnswer(correct, prob, curMode, curDiff) {
+  function recordAnswer(correct, prob, curMode, curDiff, fastMs = null) {
     const day = todayKey();
     setRecords((r) => {
       const next = { ...r };
@@ -2684,6 +2783,21 @@ function MathMonsterBattle() {
         if (a >= 1 && a <= 9) {
           const key = correct ? "tableCorrect" : "tableWrong";
           next[key] = { ...(r[key] || {}), [a]: ((r[key] || {})[a] || 0) + 1 };
+          // だんごとの れんぞくせいかい
+          const st = { ...(r.tableStreak || {}) };
+          st[a] = correct ? (st[a] || 0) + 1 : 0;
+          next.tableStreak = st;
+          if (correct) {
+            const bs = { ...(r.tableBestStreak || {}) };
+            bs[a] = Math.max(bs[a] || 0, st[a]);
+            next.tableBestStreak = bs;
+            // はやく こたえられたか
+            if (fastMs !== null && fastMs <= 2000) {
+              const kf = { ...(r.kukuFast || {}) };
+              kf[a] = (kf[a] || 0) + 1;
+              next.kukuFast = kf;
+            }
+          }
         }
       }
       return next;
@@ -2723,7 +2837,7 @@ function MathMonsterBattle() {
       expFracRef.current = exactExp - gainedExp;
       if (gainedExp > 0) setExp((e) => e + gainedExp);
       if (isCritical) setRecords((r) => ({ ...r, critCount: r.critCount + 1 }));
-      recordAnswer(true, problem, mode, difficulty);
+      recordAnswer(true, problem, mode, difficulty, elapsed);
       setEnemyHp((hp) => Math.max(0, hp - dmg));
     } else {
       const type = forcedType === "timeout" ? "timeout" : "wrong";
