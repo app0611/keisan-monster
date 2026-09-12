@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20260911-213309";
+var APP_VERSION = "20260912-071227";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -257,6 +257,9 @@ const CRIT_MULTIPLIER = 1.5;
 // 何ステージごとに ボスが でるか
 const BOSS_INTERVAL = 3;
 
+// ---------- チャレンジ(バトルとは べつの あそびかた) ----------
+const TIME_ATTACK_SEC = 60; // タイムアタックの じかん
+
 // ---------- けいけんち ----------
 const EXP_PER_CORRECT = 1;   // せいかい 1もん
 const EXP_PER_STAGE = 3;     // ふつうの ステージ クリア
@@ -469,6 +472,50 @@ const ACHIEVEMENTS = [
     check: (r) => Object.values(r.kukuFast || {}).reduce((a, b) => a + b, 0) >= 300 },
   { id: "kuku500", emoji: "📕", name: "九九 500もん", desc: "九九で つうさん 500もん せいかい",
     check: (r) => Object.values(r.tableCorrect || {}).reduce((a, b) => a + b, 0) >= 500 },
+  // ---- チャレンジ ----
+  { id: "ta20", emoji: "⏱️", name: "タイムアタック 20もん", desc: "60びょうで 20もん せいかい",
+    check: (r) => (r.bestTimeAttack || 0) >= 20 },
+  { id: "ta30", emoji: "🚀", name: "タイムアタック 30もん", desc: "60びょうで 30もん せいかい",
+    check: (r) => (r.bestTimeAttack || 0) >= 30 },
+  { id: "ta45", emoji: "🌠", name: "タイムアタック 45もん", desc: "60びょうで 45もん せいかい",
+    check: (r) => (r.bestTimeAttack || 0) >= 45 },
+  { id: "taPlay", emoji: "🎬", name: "タイムアタック デビュー", desc: "タイムアタックを 1かい あそぶ",
+    check: (r) => (r.bestTimeAttack || 0) >= 1 },
+  { id: "sv10", emoji: "💀", name: "サバイバル 10もん", desc: "サバイバルで 10もん れんぞく",
+    check: (r) => (r.bestSurvival || 0) >= 10 },
+  { id: "sv30", emoji: "☠️", name: "サバイバル 30もん", desc: "サバイバルで 30もん れんぞく",
+    check: (r) => (r.bestSurvival || 0) >= 30 },
+  { id: "sv50", emoji: "👻", name: "サバイバル 50もん", desc: "サバイバルで 50もん れんぞく",
+    check: (r) => (r.bestSurvival || 0) >= 50 },
+
+  // ---- せいかつ ----
+  { id: "morning", emoji: "🌅", name: "あさがた", desc: "あさ(5〜9じ)に あそぶ",
+    check: (r) => !!r.morningPlay },
+  { id: "night", emoji: "🌙", name: "よふかし", desc: "よる(20じ いこう)に あそぶ",
+    check: (r) => !!r.nightPlay },
+  { id: "allsubj", emoji: "🎒", name: "3きょうか せいは", desc: "1日で さんすう・19×19・しゃかいを ぜんぶ あそぶ",
+    check: (r) => !!r.allSubjectsDay },
+
+  // ---- コレクション ----
+  { id: "my10", emoji: "🖌️", name: "モンスター さっか", desc: "じぶんの モンスターを 10たい とうろく",
+    check: (r) => (r.myMonsters?.length || 0) >= 10 },
+  { id: "gachaAll", emoji: "🎊", name: "ガチャ コンプリート", desc: "ガチャの アイテムを ぜんぶ あつめる",
+    check: (r) => (r.gachaOwned?.length || 0) >= GACHA_ITEMS.length },
+  { id: "enemyAll", emoji: "📚", name: "てき ずかん コンプリート", desc: "すべての てきに であう",
+    check: (r) => (r.seenEnemies?.length || 0) >= ENEMIES.length + BOSSES.length },
+
+  // ---- こたえかた・ふくしゅう ----
+  { id: "keypad100", emoji: "🔢", name: "じぶんで こたえる", desc: "テンキーで 100もん せいかい",
+    check: (r) => (r.keypadCorrect || 0) >= 100 },
+  { id: "keypad500", emoji: "⌨️", name: "テンキーの たつじん", desc: "テンキーで 500もん せいかい",
+    check: (r) => (r.keypadCorrect || 0) >= 500 },
+  { id: "keypad1000", emoji: "🎹", name: "まぐれ なしの 1000もん", desc: "テンキーで 1000もん せいかい",
+    check: (r) => (r.keypadCorrect || 0) >= 1000 },
+  { id: "review50", emoji: "🔁", name: "にがてを こくふく", desc: "まちがえた もんだいを 50かい せいかい",
+    check: (r) => (r.reviewCleared || 0) >= 50 },
+  { id: "review200", emoji: "📖", name: "ふくしゅうの たつじん", desc: "まちがえた もんだいを 200かい せいかい",
+    check: (r) => (r.reviewCleared || 0) >= 200 },
+
   // ---- インドしき 19×19 ----
   { id: "india100", emoji: "🇮🇳", name: "19×19 にゅうもん", desc: "19×19で 100もん せいかい",
     check: (r) => Object.values(r.indiaCorrect || {}).reduce((a, b) => a + b, 0) >= 100 },
@@ -582,6 +629,10 @@ const ACHIEVEMENTS = [
     check: (r) => (r.finishedRoutes || []).includes("special") },
   { id: "social50", emoji: "🗾", name: "とどうふけん はかせ", desc: "しゃかいで 50もん せいかい",
     check: (r) => (r.socialCorrect || 0) >= 50 },
+  { id: "spec50", emoji: "🍎", name: "とくさんひん はかせ", desc: "とくさんひんで 50もん せいかい",
+    check: (r) => (r.specCorrect || 0) >= 50 },
+  { id: "spec150", emoji: "🎁", name: "にっぽんの めいさん", desc: "とくさんひんで 150もん せいかい",
+    check: (r) => (r.specCorrect || 0) >= 150 },
   { id: "social200", emoji: "🏯", name: "にっぽん まるわかり", desc: "しゃかいで 200もん せいかい",
     check: (r) => (r.socialCorrect || 0) >= 200 },
   { id: "myfirst", emoji: "🎨", name: "はじめての じさくモンスター", desc: "じぶんの モンスターを 1たい とうろく",
@@ -694,7 +745,8 @@ const SOCIAL_MODES = [
   { id: "social-capital", label: "けんちょうしょざいち", emoji: "🏛️", desc: "けんめい → しょざいち" },
   { id: "social-pref", label: "けんめい", emoji: "📍", desc: "しょざいち → けんめい" },
   { id: "social-region", label: "ちほう", emoji: "🧭", desc: "けん → ちほう" },
-  { id: "social-mix", label: "ぜんぶ", emoji: "🎲", desc: "3しゅるいから ランダム" },
+  { id: "social-spec", label: "とくさんひん", emoji: "🍎", desc: "けん → ゆうめいな もの" },
+  { id: "social-mix", label: "ぜんぶ", emoji: "🎲", desc: "4しゅるいから ランダム" },
 ];
 
 const MODE_GROUPS = [
@@ -718,7 +770,8 @@ const MODE_REWARD = {
   "social-capital": 1.5,
   "social-pref": 1.5,
   "social-region": 1.2,
-  "social-mix": 1.6,
+  "social-spec": 1.6,
+  "social-mix": 1.7,
   "india-11-15": 1.8,
   "india-16-19": 2.2,
   "india-square": 2.0,
@@ -739,7 +792,8 @@ const MODE_TIME = {
   "social-capital": 1.6,
   "social-pref": 1.6,
   "social-region": 1.3,
-  "social-mix": 1.6,
+  "social-spec": 1.7,
+  "social-mix": 1.7,
   "india-11-15": 1.3,
   "india-16-19": 1.4,
   "india-square": 1.2,
@@ -855,6 +909,29 @@ function getTimeLimit(level) {
   return level === 1 ? 14000 : level === 2 ? 12000 : 10500;
 }
 
+// 九九の よみかた(まちがえた ときに みせる)
+const KUKU_YOMI = {
+  1:["いんいちが","いんにが","いんさんが","いんしが","いんごが","いんろくが","いんしちが","いんはちが","いんくが"],
+  2:["にいちが","ににんが","にさんが","にしが","にごじゅう","にろくじゅうに","にしちじゅうし","にはちじゅうろく","にくじゅうはち"],
+  3:["さんいちが","さんにが","さざんが","さんしじゅうに","さんごじゅうご","さぶろくじゅうはち","さんしちにじゅういち","さんぱにじゅうし","さんくにじゅうしち"],
+  4:["しいちが","しにが","しさんじゅうに","ししじゅうろく","しごにじゅう","しろくにじゅうし","ししちにじゅうはち","しはさんじゅうに","しくさんじゅうろく"],
+  5:["ごいちが","ごにじゅう","ごさんじゅうご","ごしにじゅう","ごごにじゅうご","ごろくさんじゅう","ごしちさんじゅうご","ごはしじゅう","ごっくしじゅうご"],
+  6:["ろくいちが","ろくにじゅうに","ろくさんじゅうはち","ろくしにじゅうし","ろくごさんじゅう","ろくろくさんじゅうろく","ろくしちしじゅうに","ろくはしじゅうはち","ろっくごじゅうし"],
+  7:["しちいちが","しちにじゅうし","しちさんにじゅういち","しちしにじゅうはち","しちごさんじゅうご","しちろくしじゅうに","しちしちしじゅうく","しちはごじゅうろく","しちくろくじゅうさん"],
+  8:["はちいちが","はちにじゅうろく","はちさんにじゅうし","はちしさんじゅうに","はちごしじゅう","はちろくしじゅうはち","はちしちごじゅうろく","はっぱろくじゅうし","はっくしちじゅうに"],
+  9:["くいちが","くにじゅうはち","くさんにじゅうしち","くしさんじゅうろく","くごしじゅうご","くろくごじゅうし","くしちろくじゅうさん","くはしちじゅうに","くくはちじゅういち"],
+};
+
+function kukuYomi(prob) {
+  if (!prob || !prob.text || !prob.text.includes("×")) return null;
+  const parts = prob.text.split("×").map((x) => parseInt(x.trim(), 10));
+  const [a, b] = parts;
+  if (a >= 1 && a <= 9 && b >= 1 && b <= 9) {
+    return `「${KUKU_YOMI[a][b - 1]} ${prob.answer}」`;
+  }
+  return null;
+}
+
 // ---------- しゃかい: 47とどうふけん ----------
 // [けんめい, けんちょうしょざいち, ちほう]
 const PREFS = [
@@ -930,12 +1007,63 @@ const OTHER_CITIES = {
   "沖縄県": ["沖縄市", "浦添市"],
 };
 
+// 県ごとの ゆうめいな もの(じゅんいは あつかわない・こたえが 1つに なるものだけ)
+const SPECIALTIES = {
+  "北海道": ["じゃがいも", "こんぶ", "乳牛"],
+  "青森県": ["りんご", "にんにく"],
+  "岩手県": ["わかめ", "南部鉄器"],
+  "宮城県": ["かき(貝)", "ささかまぼこ"],
+  "秋田県": ["きりたんぽ", "あきたこまち"],
+  "山形県": ["さくらんぼ", "ラ・フランス"],
+  "福島県": ["あかべこ", "もも"],
+  "茨城県": ["なっとう", "ほしいも"],
+  "栃木県": ["いちご", "かんぴょう"],
+  "群馬県": ["こんにゃく", "キャベツ"],
+  "埼玉県": ["ねぎ", "草加せんべい"],
+  "千葉県": ["らっかせい", "しょうゆ"],
+  "東京都": ["江戸きりこ", "つくだに"],
+  "神奈川県": ["しゅうまい", "かまぼこ"],
+  "新潟県": ["こしひかり", "おかき"],
+  "富山県": ["ますずし", "くすり"],
+  "石川県": ["輪島ぬり", "金ぱく"],
+  "福井県": ["めがねフレーム", "越前がに"],
+  "山梨県": ["ぶどう", "ワイン"],
+  "長野県": ["そば", "レタス"],
+  "岐阜県": ["刃物", "美濃和紙"],
+  "静岡県": ["お茶", "うなぎ"],
+  "愛知県": ["みそ", "自動車"],
+  "三重県": ["しんじゅ", "伊勢えび", "松阪牛"],
+  "滋賀県": ["ふなずし", "信楽やき"],
+  "京都府": ["にしじんおり", "八ツ橋", "宇治茶"],
+  "大阪府": ["たこやき", "くしカツ"],
+  "兵庫県": ["神戸牛", "そうめん"],
+  "奈良県": ["ならづけ", "すみ"],
+  "和歌山県": ["うめぼし", "みかん"],
+  "鳥取県": ["なし", "らっきょう", "ずわいがに"],
+  "島根県": ["しじみ", "出雲そば"],
+  "岡山県": ["きびだんご", "マスカット"],
+  "広島県": ["お好みやき", "もみじまんじゅう"],
+  "山口県": ["ふぐ", "ういろう"],
+  "徳島県": ["すだち", "あいぞめ"],
+  "香川県": ["さぬきうどん", "オリーブ"],
+  "愛媛県": ["タオル", "まだい"],
+  "高知県": ["かつお", "ゆず", "なす"],
+  "福岡県": ["めんたいこ", "あまおう"],
+  "佐賀県": ["有田やき", "のり"],
+  "長崎県": ["カステラ", "ちゃんぽん", "びわ"],
+  "熊本県": ["すいか", "からしれんこん", "いぐさ"],
+  "大分県": ["かぼす", "しいたけ"],
+  "宮崎県": ["マンゴー", "ひなどり", "ピーマン"],
+  "鹿児島県": ["さつまいも", "くろぶた", "かつおぶし"],
+  "沖縄県": ["さとうきび", "ゴーヤ", "シーサー"],
+};
+
 const REGIONS = ["北海道", "東北", "関東", "中部", "近畿", "中国", "四国", "九州"];
 
 // しゃかいの もんだいを つくる
 // kind: 'capital'(けんちょうしょざいち) / 'pref'(けんめい) / 'region'(ちほう) / 'mix'
 function makeSocialProblem(kind) {
-  const k = kind === "mix" ? pick(["capital", "pref", "region"]) : kind;
+  const k = kind === "mix" ? pick(["capital", "pref", "region", "spec", "spec"]) : kind;
   const [name, capital, region] = pick(PREFS);
 
   if (k === "capital") {
@@ -965,6 +1093,25 @@ function makeSocialProblem(kind) {
       text: `${city}は どこの けん?`,
       answer: name,
       distractors: [...same, ...other].sort(() => Math.random() - 0.5).slice(0, 6),
+    };
+  }
+
+  // とくさんひん
+  if (k === "spec") {
+    const mine = SPECIALTIES[name] || [];
+    const answer = pick(mine);
+    // おなじ ちほうの ほかの県の ものを ゆうせんして まぜる
+    const sameR = PREFS.filter((p) => p[2] === region && p[0] !== name).flatMap(
+      (p) => SPECIALTIES[p[0]] || []
+    );
+    const other = PREFS.filter((p) => p[2] !== region).flatMap((p) => SPECIALTIES[p[0]] || []);
+    return {
+      text: `${name}で ゆうめいな ものは?`,
+      answer,
+      distractors: [
+        ...sameR.sort(() => Math.random() - 0.5),
+        ...other.sort(() => Math.random() - 0.5),
+      ].slice(0, 6),
     };
   }
 
@@ -2364,6 +2511,15 @@ function MathMonsterBattle() {
     indiaCorrect: {},    // 19×19の だんごと せいかい
     indiaWrong: {},
     indiaSquare: 0,      // 2じょうの せいかい
+    specCorrect: 0,      // とくさんひんの せいかい
+    keypadCorrect: 0,    // テンキーでの せいかい
+    reviewCleared: 0,    // ふくしゅうもんだいの せいかい
+    bestTimeAttack: 0,   // 60びょうで といた さいこう もんすう
+    bestSurvival: 0,     // サバイバルの さいこう れんぞく
+    morningPlay: false,  // あさ(5〜9じ)に あそんだ
+    nightPlay: false,    // よる(20じ いこう)に あそんだ
+    subjectsToday: [],   // きょう あそんだ きょうか
+    allSubjectsDay: false, // 1日で 3きょうか ぜんぶ
     gradeCorrect: {},
     gradeWrong: {},
     daily: {}, // { "2026-8-22": { correct: 12, wrong: 3 } }
@@ -2388,6 +2544,19 @@ function MathMonsterBattle() {
   const [confirmRebirth, setConfirmRebirth] = useState(false);
   const [dashOpen, setDashOpen] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
+  // まちがえた もんだいを おぼえて あとで もういちど だす
+  const reviewRef = useRef([]); // [{text, answer, distractors, due, miss}]
+  const [reviewCount, setReviewCount] = useState(0);
+  const [isReview, setIsReview] = useState(false);
+  // テンキーモード
+  const [inputMode, setInputMode] = useState("choice"); // 'choice' | 'keypad'
+  const [typed, setTyped] = useState("");
+  // チャレンジ('timeattack' | 'survival')
+  const [challenge, setChallenge] = useState(null);
+  const [chScore, setChScore] = useState(0);
+  const [chLeft, setChLeft] = useState(TIME_ATTACK_SEC);
+  const [chResult, setChResult] = useState(null);
+  const chTickRef = useRef(null);
   // プロフィール(きょうだいで つかいわける)
   const [profiles, setProfiles] = useState(() => loadProfiles());
   const [activeId, setActiveId] = useState(() => loadActiveProfile(loadProfiles()));
@@ -2518,6 +2687,7 @@ function MathMonsterBattle() {
           setStageNumber(sn);
           setDifficulty(diff);
           if (data.artStyle) setArtStyle(data.artStyle);
+          if (data.inputMode) setInputMode(data.inputMode);
           if (data.mode) setMode(data.mode);
           if (data.selectedTables) setSelectedTables(data.selectedTables);
           if (data.bag) setBag(data.bag);
@@ -2527,7 +2697,10 @@ function MathMonsterBattle() {
           if (data.bestFloor) setBestFloor(data.bestFloor);
           if (data.towerMode) {
             setTowerMode(true);
-            setTowerFloor(data.towerFloor || 1);
+            const f = data.towerFloor || 1;
+            setTowerFloor(f);
+            // ふるい セーブで てきHPが 0の ままなら たてなおす
+            if (!data.enemyHp || data.enemyHp <= 0) setEnemyHp(towerEnemy(f).hp);
           }
           if (data.records) setRecords((r) => ({ ...r, ...data.records }));
           if (data.myMonsters) setMyMonsters(data.myMonsters);
@@ -2592,6 +2765,7 @@ function MathMonsterBattle() {
             playerHp,
             difficulty,
             artStyle,
+            inputMode,
             mode,
             selectedTables,
             bag,
@@ -2632,6 +2806,7 @@ function MathMonsterBattle() {
     playerHp,
     difficulty,
     artStyle,
+    inputMode,
     mode,
     selectedTables,
     bag,
@@ -2699,6 +2874,15 @@ function MathMonsterBattle() {
       indiaCorrect: {},
       indiaWrong: {},
       indiaSquare: 0,
+      specCorrect: 0,
+      keypadCorrect: 0,
+      reviewCleared: 0,
+      bestTimeAttack: 0,
+      bestSurvival: 0,
+      morningPlay: false,
+      nightPlay: false,
+      subjectsToday: [],
+      allSubjectsDay: false,
       gradeCorrect: {},
       gradeWrong: {},
       daily: {},
@@ -2739,8 +2923,57 @@ function MathMonsterBattle() {
     setScreen("start");
   }
 
+  // まちがえた もんだいを おぼえておく(refで すぐ よみかき できるように)
+  function pushReview(prob) {
+    if (!prob || !prob.text) return;
+    const q = reviewRef.current.filter((x) => x.text !== prob.text);
+    const before = reviewRef.current.find((x) => x.text === prob.text);
+    q.push({
+      text: prob.text,
+      answer: prob.answer,
+      distractors: prob.distractors || [],
+      due: 3, // 3もんご に もういちど だす
+      miss: Math.min(3, (before?.miss || 0) + 1),
+    });
+    reviewRef.current = q.slice(-40);
+    setReviewCount(reviewRef.current.length);
+  }
+
+  // せいかいしたら かんかくを あける。3かい せいかいで そつぎょう
+  function passReview(text) {
+    reviewRef.current = reviewRef.current
+      .map((x) => (x.text === text ? { ...x, miss: x.miss - 1, due: 8 } : x))
+      .filter((x) => x.miss > 0);
+    setReviewCount(reviewRef.current.length);
+  }
+
+  // つぎに だす ふくしゅうもんだいが あれば とりだす
+  function takeReview() {
+    reviewRef.current = reviewRef.current.map((x) => ({ ...x, due: x.due - 1 }));
+    const idx = reviewRef.current.findIndex((x) => x.due <= 0);
+    if (idx < 0) return null;
+    const item = reviewRef.current[idx];
+    reviewRef.current[idx] = { ...item, due: 8 };
+    return item;
+  }
+
   function newProblem() {
-    const built = buildProblemState(stageNumber, difficulty, recentResultsRef.current, mode, selectedTables);
+    // まちがえた もんだいの じゅんばんが きたら それを ゆうせんする
+    const review = takeReview();
+    const built = review
+      ? {
+          problem: { text: review.text, answer: review.answer, distractors: review.distractors },
+          choices: makeChoices({
+            text: review.text,
+            answer: review.answer,
+            distractors: review.distractors,
+          }),
+          timeLimit: getTimeLimit(currentLevel || 1),
+          level: currentLevel || 1,
+        }
+      : buildProblemState(stageNumber, difficulty, recentResultsRef.current, mode, selectedTables);
+    setIsReview(!!review);
+    setTyped("");
     setHintedChoices(null);
     let limit = timeFor(built.timeLimit);
     if (sandLeft > 0) {
@@ -2761,6 +2994,7 @@ function MathMonsterBattle() {
   // バトル中で、じゃまが なにも ないときだけ 時間が すすむ
   const timerRunning =
     loaded &&
+    !challenge &&
     screen === "game" &&
     tab === "battle" &&
     !stageClear &&
@@ -2828,7 +3062,11 @@ function MathMonsterBattle() {
   }
 
   function applyEnemyAttack() {
-    const enemy = currentEnemy();
+    // テンキーで こたえられる もんだいか(すうじ だけの こたえ)
+  const canUseKeypad = !!problem && /^[0-9]+(\.[0-9]+)?$/.test(problem.answer);
+  const useKeypad = inputMode === "keypad" && canUseKeypad;
+
+  const enemy = currentEnemy();
     const dmg = Math.max(1, enemy.atk - def);
     setFlashPlayer(true);
     setPlayerHp((hp) => Math.max(0, hp - dmg));
@@ -2840,6 +3078,23 @@ function MathMonsterBattle() {
     const day = todayKey();
     setRecords((r) => {
       const next = { ...r };
+      // じかんたい(あさ・よる)
+      const hour = new Date().getHours();
+      if (hour >= 5 && hour < 9) next.morningPlay = true;
+      if (hour >= 20) next.nightPlay = true;
+
+      // きょう あそんだ きょうか
+      const subj = curMode && curMode.startsWith("social-")
+        ? "social"
+        : curMode && curMode.startsWith("india-")
+        ? "india"
+        : "math";
+      const prevDay = (r.subjectsToday || []).find((x) => x.day === day);
+      const list = prevDay ? prevDay.subjects : [];
+      const merged = list.includes(subj) ? list : [...list, subj];
+      next.subjectsToday = [{ day, subjects: merged }];
+      if (merged.length >= 3) next.allSubjectsDay = true;
+
       // あそんだ日と れんぞく日すう
       const days = Array.from(new Set([...(r.playDays || []), day])).sort();
       if (days.length > 400) days.splice(0, days.length - 400);
@@ -2883,6 +3138,9 @@ function MathMonsterBattle() {
       if (curMode && curMode.startsWith("social-")) {
         const key = correct ? "socialCorrect" : "socialWrong";
         next[key] = (r[key] || 0) + 1;
+        if (correct && prob && prob.text && prob.text.includes("ゆうめいな もの")) {
+          next.specCorrect = (r.specCorrect || 0) + 1;
+        }
       }
       // 九九の だんごと
       if (prob && prob.text && prob.text.includes("×")) {
@@ -2913,6 +3171,39 @@ function MathMonsterBattle() {
 
   function resolveTurn(choice, forcedType) {
     if (feedback || stageClear || evolveEvent || branchPrompt || eggPrompt) return;
+
+    // ---- チャレンジ中は スコアを かぞえるだけ ----
+    if (challenge) {
+      const ok = forcedType !== "timeout" && choice === problem.answer;
+      recordAnswer(ok, problem, mode, difficulty, ok ? timeLimit - remainingRef.current : null);
+      if (ok) {
+        setChScore((n) => n + 1);
+        setCorrectCount((c) => c + 1);
+        setFeedback({ type: "correct" });
+        setFloatingText("+1");
+      } else {
+        setFeedback({ type: forcedType === "timeout" ? "timeout" : "wrong" });
+        pushReview(problem);
+        if (challenge === "survival") {
+          setTimeout(() => endChallengeRef.current("miss"), 900);
+          return;
+        }
+      }
+      setTimeout(() => {
+        setFeedback(null);
+        setFloatingText(null);
+        setTyped("");
+        const built = buildProblemState(1, difficulty, recentResultsRef.current, mode, selectedTables);
+        setProblem(built.problem);
+        setChoices(built.choices);
+        setCurrentLevel(built.level);
+        setIsReview(false);
+        setHintedChoices(null);
+        answeredRef.current = false;
+      }, ok ? 320 : 800);
+      return;
+    }
+
     const elapsed = timeLimit - remainingRef.current;
     const isCorrect = forcedType !== "timeout" && choice === problem.answer;
     const critLimit = (CRIT_MS[currentLevel] || CRIT_MS[1]) + stats.critExtraMs;
@@ -2945,11 +3236,17 @@ function MathMonsterBattle() {
       if (gainedExp > 0) setExp((e) => e + gainedExp);
       if (isCritical) setRecords((r) => ({ ...r, critCount: r.critCount + 1 }));
       recordAnswer(true, problem, mode, difficulty, elapsed);
+      if (useKeypad) setRecords((r) => ({ ...r, keypadCorrect: (r.keypadCorrect || 0) + 1 }));
+      if (isReview) {
+        passReview(problem.text);
+        setRecords((r) => ({ ...r, reviewCleared: (r.reviewCleared || 0) + 1 }));
+      }
       setEnemyHp((hp) => Math.max(0, hp - dmg));
     } else {
       const type = forcedType === "timeout" ? "timeout" : "wrong";
       if (type === "timeout") setRecords((r) => ({ ...r, timeoutCount: (r.timeoutCount || 0) + 1 }));
       recordAnswer(false, problem, mode, difficulty);
+      pushReview(problem);
       stageWrongRef.current += 1;
       const dmg = applyEnemyAttack();
       setFeedback({ type });
@@ -2966,6 +3263,25 @@ function MathMonsterBattle() {
       setFlashPlayer(false);
       newProblem();
     }, 800);
+  }
+
+  // テンキー: すうじを おす
+  function pressKey(k) {
+    if (feedback || answeredRef.current || stageClear || evolveEvent || branchPrompt || eggPrompt) return;
+    if (k === "back") {
+      setTyped((t) => t.slice(0, -1));
+      return;
+    }
+    if (k === "clear") {
+      setTyped("");
+      return;
+    }
+    if (k === "ok") {
+      if (!typed) return;
+      handleAnswer(typed);
+      return;
+    }
+    setTyped((t) => (t.length >= 6 ? t : t + k));
   }
 
   function handleAnswer(choice) {
@@ -3158,6 +3474,27 @@ function MathMonsterBattle() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawOpen, drawColor, drawSize, eraser]);
 
+  // タイムアタックの カウントダウン
+  useEffect(() => {
+    if (challenge !== "timeattack" || screen !== "game") return;
+    chTickRef.current = setInterval(() => {
+      setChLeft((t) => {
+        if (t <= 1) {
+          clearInterval(chTickRef.current);
+          endChallengeRef.current("time");
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+    return () => clearInterval(chTickRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [challenge, screen]);
+
+  // さいしんの endChallenge を もっておく
+  const endChallengeRef = useRef(() => {});
+  endChallengeRef.current = endChallenge;
+
   // アイテムの おしらせを じどうで けす
   useEffect(() => {
     if (!itemToast) return;
@@ -3309,6 +3646,19 @@ function MathMonsterBattle() {
 
   // どの タブから はいっても もんだいと タイマーを しょきかする
   function enterGame(startTab = "battle") {
+    // てきが たおれた ままなら たてなおす(クリアちょくごに やめた ばあい)
+    if (enemyHp <= 0) {
+      if (towerMode) {
+        const nf = towerFloor + 1;
+        setTowerFloor(nf);
+        setEnemyHp(towerEnemy(nf).hp);
+      } else {
+        const ns = stageNumber + 1;
+        setStageNumber(ns);
+        setEnemyHp(enemyForStage(ns).hp);
+      }
+      setStageClear(null);
+    }
     stageStartTime.current = Date.now();
     stageWrongRef.current = 0;
     lastTickRef.current = Date.now();
@@ -3653,6 +4003,44 @@ function MathMonsterBattle() {
     }));
   }
 
+  // ---------- チャレンジ ----------
+  function startChallenge(kind) {
+    setChallenge(kind);
+    setChScore(0);
+    setChLeft(TIME_ATTACK_SEC);
+    setChResult(null);
+    setTab("battle");
+    setFeedback(null);
+    setTyped("");
+    setHintedChoices(null);
+    reviewRef.current = [];
+    setReviewCount(0);
+    recentResultsRef.current = [];
+    const built = buildProblemState(1, difficulty, [], mode, selectedTables);
+    setProblem(built.problem);
+    setChoices(built.choices);
+    setCurrentLevel(built.level);
+    setIsReview(false);
+    answeredRef.current = false;
+    setScreen("game");
+  }
+
+  // チャレンジを おえる
+  function endChallenge(reason) {
+    const score = chScore;
+    if (challenge === "timeattack") {
+      setRecords((r) => ({ ...r, bestTimeAttack: Math.max(r.bestTimeAttack || 0, score) }));
+    } else if (challenge === "survival") {
+      setRecords((r) => ({ ...r, bestSurvival: Math.max(r.bestSurvival || 0, score) }));
+    }
+    // ごほうびの ポイント
+    const gain = Math.round(score * (challenge === "survival" ? 3 : 2) * rewardMult(mode));
+    if (gain > 0) setPoints((p) => p + gain);
+    setChResult({ kind: challenge, score, gain, reason });
+    setChallenge(null);
+    setScreen("start");
+  }
+
   // エンドレスタワーを はじめる
   function startTower() {
     setTowerMode(true);
@@ -3679,10 +4067,20 @@ function MathMonsterBattle() {
 
   // タワーを ちゅうだんする(かいは のこして あとで つづきから)
   function pauseTower() {
-    setBestFloor((b) => Math.max(b, towerFloor - 1));
+    // かいクリアご の ちゅうだんなら、つぎの かいから さいかいする
+    const clearedNow = enemyHp === 0 || !!stageClear;
+    const nextFloor = clearedNow ? towerFloor + 1 : towerFloor;
+    if (clearedNow) {
+      setTowerFloor(nextFloor);
+      setBestFloor((b) => Math.max(b, towerFloor));
+      setPlayerHp((hp) => Math.min(maxHp, hp + Math.round(maxHp * 0.3)));
+    } else {
+      setBestFloor((b) => Math.max(b, towerFloor - 1));
+    }
+    setEnemyHp(towerEnemy(nextFloor).hp);
     setStageClear(null);
     setScreen("start");
-    setItemToast(`🗼 ${towerFloor}かいで ちゅうだん。あとで つづけられるよ`);
+    setItemToast(`🗼 ${nextFloor}かいで ちゅうだん。あとで つづけられるよ`);
   }
 
   // タワーを やめて ふつうの ぼうけんに もどる
@@ -3705,6 +4103,8 @@ function MathMonsterBattle() {
     setTowerResult(null);
     setStageClear(null);
     setTab("battle");
+    // てきのHPを その かいの さいだいに もどす(0のままだと せんとうが すすまない)
+    setEnemyHp(towerEnemy(towerFloor).hp);
     stageStartPoints.current = points;
     stageStartTime.current = Date.now();
     stageWrongRef.current = 0;
@@ -4057,6 +4457,26 @@ function MathMonsterBattle() {
         )}
 
         <div style={styles.startContent}>
+          {chResult && (
+            <div style={styles.towerResult}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#FFD23F" }}>
+                {chResult.kind === "timeattack" ? "⏱️ タイムアタック" : "💀 サバイバル"} しゅうりょう
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4 }}>
+                {chResult.score}もん せいかい!
+              </div>
+              <div style={{ fontSize: 12, color: "#7ED957", marginTop: 2 }}>
+                💰 +{chResult.gain} ポイント
+              </div>
+              <div style={{ fontSize: 11, color: "#B8B3E0", marginTop: 2 }}>
+                {chResult.reason === "miss" ? "まちがえて しゅうりょう" : "じかん いっぱい!"}
+              </div>
+              <button onClick={() => setChResult(null)} style={styles.resetNoBtn}>
+                とじる
+              </button>
+            </div>
+          )}
+
           {towerResult && (
             <div style={styles.towerResult}>
               <div style={{ fontSize: 16, fontWeight: 800, color: "#FFD23F" }}>
@@ -4342,6 +4762,33 @@ function MathMonsterBattle() {
           </>
           )}
 
+          <div style={styles.difficultyLabel}>こたえかた</div>
+          <div style={styles.difficultyRow}>
+            {[
+              { id: "choice", label: "4つから えらぶ", emoji: "🔘" },
+              { id: "keypad", label: "すうじを いれる", emoji: "🔢" },
+            ].map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setInputMode(m.id)}
+                style={{
+                  ...styles.difficultyBtn,
+                  ...(inputMode === m.id ? styles.difficultyBtnActive : {}),
+                  minWidth: 96,
+                }}
+              >
+                <div style={{ fontSize: 18 }}>{m.emoji}</div>
+                <div style={{ fontSize: 11, fontWeight: 700 }}>{m.label}</div>
+              </button>
+            ))}
+          </div>
+          <div style={styles.difficultyDesc}>
+            {inputMode === "keypad"
+              ? "まぐれ あたりが ない ほんきモード"
+              : "えらぶだけ なので かんたん"}
+          </div>
+          <div style={{ height: 12 }} />
+
           <div style={styles.difficultyLabel}>えのタイプ</div>
           <div style={styles.difficultyRow}>
             {[
@@ -4421,6 +4868,22 @@ function MathMonsterBattle() {
                 )}
               </button>
             ))}
+          </div>
+
+          {/* チャレンジ */}
+          <div style={styles.challengeRow}>
+            <button onClick={() => startChallenge("timeattack")} style={styles.chBtn}>
+              <span style={{ fontSize: 17 }}>⏱️</span>
+              <span style={styles.chBtnLabel}>タイムアタック</span>
+              <span style={styles.chBest}>
+                さいこう {records.bestTimeAttack || 0}もん
+              </span>
+            </button>
+            <button onClick={() => startChallenge("survival")} style={styles.chBtn}>
+              <span style={{ fontSize: 17 }}>💀</span>
+              <span style={styles.chBtnLabel}>サバイバル</span>
+              <span style={styles.chBest}>さいこう {records.bestSurvival || 0}もん</span>
+            </button>
           </div>
 
           {/* エンドレスタワー */}
@@ -4841,6 +5304,27 @@ function MathMonsterBattle() {
       {/* タブコンテンツ */}
       {tab === "battle" && !stageClear && (
         <div style={styles.battleScreen}>
+          {challenge && (
+            <div style={styles.chHud}>
+              <span style={styles.chHudLabel}>
+                {challenge === "timeattack" ? "⏱️ タイムアタック" : "💀 サバイバル"}
+              </span>
+              {challenge === "timeattack" ? (
+                <span style={{ ...styles.chHudBig, color: chLeft <= 10 ? "#FF6B4A" : "#FFD23F" }}>
+                  のこり {chLeft}びょう
+                </span>
+              ) : (
+                <span style={styles.chHudBig}>{chScore}もん れんぞく</span>
+              )}
+              <span style={styles.chHudScore}>
+                {challenge === "timeattack" ? `${chScore}もん` : "1つでも まちがえたら おわり"}
+              </span>
+              <button onClick={() => endChallengeRef.current("quit")} style={styles.pauseBtn}>
+                やめる
+              </button>
+            </div>
+          )}
+
           <div style={styles.stageLabelRow}>
             <span style={styles.stageLabel}>
               {towerMode ? `🗼 タワー ${towerFloor}かい` : `ステージ ${stageNumber}`}
@@ -4862,6 +5346,7 @@ function MathMonsterBattle() {
             </span>
           </div>
           {/* たたかいの ばめん */}
+          {!challenge && (
           <div style={{ ...styles.arena, ...(enemy.isBoss ? styles.arenaBoss : {}) }}>
             {/* うえの HPバー(むかいあわせ) */}
             <div style={styles.vsBar}>
@@ -4980,7 +5465,10 @@ function MathMonsterBattle() {
             </div>
           </div>
 
+          )}
+
           {/* 制限時間バー */}
+          {!challenge && (
           <div style={styles.timerTrack}>
             <div
               style={{
@@ -5001,6 +5489,7 @@ function MathMonsterBattle() {
             />
           </div>
           <div style={styles.timerCaption}>⚡ はやく こたえると 会心の一撃!</div>
+          )}
 
           {/* 問題カード */}
           <div
@@ -5017,6 +5506,7 @@ function MathMonsterBattle() {
                   : "#4A4580",
             }}
           >
+            {isReview && <div style={styles.reviewTag}>🔁 まちがえた もんだい</div>}
             <div
               style={{
                 ...styles.problemText,
@@ -5027,7 +5517,34 @@ function MathMonsterBattle() {
             </div>
           </div>
 
-          {/* 選択肢 */}
+          {/* こたえかた */}
+          {useKeypad ? (
+            <div style={styles.keypadWrap}>
+              <div style={styles.typedBox}>
+                <span style={styles.typedText}>{typed || "?"}</span>
+              </div>
+              <div style={styles.keypad}>
+                {["7", "8", "9", "4", "5", "6", "1", "2", "3"].map((k) => (
+                  <button key={k} onClick={() => pressKey(k)} style={styles.keyBtn} disabled={!!feedback}>
+                    {k}
+                  </button>
+                ))}
+                <button onClick={() => pressKey("back")} style={styles.keySub} disabled={!!feedback}>
+                  ←
+                </button>
+                <button onClick={() => pressKey("0")} style={styles.keyBtn} disabled={!!feedback}>
+                  0
+                </button>
+                <button
+                  onClick={() => pressKey("ok")}
+                  style={{ ...styles.keyOk, opacity: typed ? 1 : 0.5 }}
+                  disabled={!!feedback || !typed}
+                >
+                  こたえる
+                </button>
+              </div>
+            </div>
+          ) : (
           <div style={styles.choiceGrid}>
             {choices.map((c) => (
               <button
@@ -5049,11 +5566,18 @@ function MathMonsterBattle() {
               </button>
             ))}
           </div>
-          {feedback?.type === "wrong" && (
-            <div style={styles.wrongHint}>おしい!こたえは {problem.answer} だよ。てきの こうげきをうけた!</div>
           )}
-          {feedback?.type === "timeout" && (
-            <div style={styles.wrongHint}>じかんぎれ!こたえは {problem.answer} だったよ</div>
+          {(feedback?.type === "wrong" || feedback?.type === "timeout") && (
+            <div style={styles.wrongBox}>
+              <div style={styles.wrongHint}>
+                {feedback.type === "timeout" ? "じかんぎれ!" : "おしい!"}
+              </div>
+              <div style={styles.answerLine}>
+                {problem.text} = <span style={styles.answerHit}>{problem.answer}</span>
+              </div>
+              {kukuYomi(problem) && <div style={styles.yomiLine}>{kukuYomi(problem)}</div>}
+              <div style={styles.retryNote}>あとで もういちど でてくるよ</div>
+            </div>
           )}
           {feedback?.type === "critical" && (
             <div style={styles.critHint}>会心の一撃!ばつぐんのダメージ!</div>
@@ -6430,6 +6954,60 @@ const styles = {
     fontSize: 9,
     fontWeight: 800,
   },
+  challengeRow: {
+    display: "flex",
+    gap: 10,
+    marginTop: 16,
+  },
+  chBtn: {
+    flex: 1,
+    background: "#22204A",
+    border: "1px solid #4A4580",
+    borderRadius: 14,
+    padding: "10px 12px",
+    color: "#F5F3FF",
+    cursor: "pointer",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 2,
+    minWidth: 120,
+  },
+  chBtnLabel: {
+    fontSize: 12,
+    fontWeight: 800,
+  },
+  chBest: {
+    fontSize: 10,
+    color: "#8A85B8",
+  },
+  chHud: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+    background: "#22204A",
+    border: "1px solid #4A4580",
+    borderRadius: 12,
+    padding: "8px 12px",
+    marginBottom: 4,
+  },
+  chHudLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#B8B3E0",
+  },
+  chHudBig: {
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 16,
+    color: "#FFD23F",
+  },
+  chHudScore: {
+    fontSize: 11,
+    color: "#8A85B8",
+    flex: 1,
+  },
   towerBox: {
     marginTop: 14,
     display: "flex",
@@ -7188,6 +7766,101 @@ const styles = {
     fontSize: 36,
     color: "#1B1B3A",
     letterSpacing: 1,
+  },
+  keypadWrap: {
+    maxWidth: 340,
+    marginLeft: "auto",
+    marginRight: "auto",
+    width: "100%",
+  },
+  typedBox: {
+    background: "#F5F3FF",
+    border: "3px solid #4A4580",
+    borderRadius: 14,
+    padding: "10px 16px",
+    textAlign: "center",
+    marginBottom: 10,
+  },
+  typedText: {
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 30,
+    color: "#1B1B3A",
+    letterSpacing: 2,
+  },
+  keypad: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr 1fr",
+    gap: 8,
+  },
+  keyBtn: {
+    padding: "14px 0",
+    borderRadius: 14,
+    border: "none",
+    background: "#3A3568",
+    color: "#F5F3FF",
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 700,
+    fontSize: 22,
+    cursor: "pointer",
+  },
+  keySub: {
+    padding: "14px 0",
+    borderRadius: 14,
+    border: "none",
+    background: "#2A2654",
+    color: "#B8B3E0",
+    fontSize: 18,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  keyOk: {
+    padding: "14px 0",
+    borderRadius: 14,
+    border: "none",
+    background: "linear-gradient(180deg, #FFD23F 0%, #FFB23F 100%)",
+    color: "#3A2400",
+    fontSize: 14,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  reviewTag: {
+    fontSize: 11,
+    fontWeight: 800,
+    color: "#4AC9FF",
+    marginBottom: 4,
+  },
+  wrongBox: {
+    background: "#2A2654",
+    border: "1px solid #4A4580",
+    borderRadius: 12,
+    padding: "8px 12px",
+    textAlign: "center",
+    maxWidth: 560,
+    marginLeft: "auto",
+    marginRight: "auto",
+    width: "100%",
+    boxSizing: "border-box",
+  },
+  answerLine: {
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 17,
+    color: "#F5F3FF",
+    marginTop: 2,
+  },
+  answerHit: {
+    color: "#7ED957",
+  },
+  yomiLine: {
+    fontSize: 12,
+    color: "#FFD23F",
+    marginTop: 2,
+  },
+  retryNote: {
+    fontSize: 10,
+    color: "#8A85B8",
+    marginTop: 3,
   },
   choiceGrid: {
     display: "grid",
