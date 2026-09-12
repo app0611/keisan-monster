@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20260912-071227";
+var APP_VERSION = "20260912-075521";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -5469,6 +5469,7 @@ function MathMonsterBattle() {
 
           {/* 制限時間バー */}
           {!challenge && (
+          <>
           <div style={styles.timerTrack}>
             <div
               style={{
@@ -5489,6 +5490,7 @@ function MathMonsterBattle() {
             />
           </div>
           <div style={styles.timerCaption}>⚡ はやく こたえると 会心の一撃!</div>
+          </>
           )}
 
           {/* 問題カード */}
