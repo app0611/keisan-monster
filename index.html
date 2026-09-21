@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20260921-085752";
+var APP_VERSION = "20260921-094105";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -116,8 +116,14 @@ function loadLib(i, cdnIndex, done){
 }
 
 window.addEventListener("error", function(e){
-  if (window.__started) return;
-  fail("エラーが おきました", String(e.message || e));
+  var msg = String((e && e.message) || e);
+  if (!window.__started) { fail("エラーが おきました", msg); return; }
+  // きどう ご: がめんが からっぽに なっていたら ないようを だす
+  var root = document.getElementById("root");
+  if (root && !root.textContent.trim()) {
+    fail("エラーが おきました(この がめんを スクショして おくってください)",
+      msg + "<br><br>ver " + APP_VERSION);
+  }
 });
 
 loadLib(0, 0, function(){
@@ -2608,6 +2614,99 @@ function MonsterFace({ stage, size, style, artStyle = "deformed", skin = null })
     );
   }
   return <span style={{ fontSize: size, ...style }}>{stage?.emoji}</span>;
+}
+
+// ---------- エラーが おきても まっくらに しない ----------
+// こまったときに なにが おきたか がめんに だす(スクショで しらべられるように)
+class ErrorCatcher extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null, info: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    this.setState({ info });
+  }
+  exportData() {
+    try {
+      const keys = Object.keys(localStorage).filter((k) => k.startsWith("math-monster"));
+      const dump = {};
+      keys.forEach((k) => (dump[k] = localStorage.getItem(k)));
+      const blob = new Blob([JSON.stringify(dump)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "keisan-monster-error-data.json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      // なにもしない
+    }
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    const msg = String((this.state.error && this.state.error.message) || this.state.error);
+    const where = ((this.state.info && this.state.info.componentStack) || "")
+      .split("\n")
+      .filter((l) => l.trim())
+      .slice(0, 4)
+      .join("\n");
+    const stack = ((this.state.error && this.state.error.stack) || "")
+      .split("\n")
+      .slice(0, 4)
+      .join("\n");
+    const box = {
+      minHeight: "100vh",
+      padding: "calc(24px + env(safe-area-inset-top)) 18px 24px",
+      background: "#1B1B3A",
+      color: "#F5F3FF",
+      fontFamily: "sans-serif",
+      boxSizing: "border-box",
+    };
+    const pre = {
+      whiteSpace: "pre-wrap",
+      wordBreak: "break-all",
+      background: "#2A2654",
+      borderRadius: 10,
+      padding: 10,
+      fontSize: 11,
+      color: "#FFB199",
+      marginTop: 8,
+    };
+    const btn = {
+      marginTop: 12,
+      marginRight: 8,
+      padding: "10px 16px",
+      borderRadius: 12,
+      border: "none",
+      background: "#FFD23F",
+      color: "#3A2400",
+      fontWeight: 800,
+      fontSize: 13,
+    };
+    return (
+      <div style={box}>
+        <div style={{ fontSize: 18, fontWeight: 800 }}>エラーが おきました</div>
+        <div style={{ fontSize: 12, color: "#B8B3E0", marginTop: 6 }}>
+          この がめんを スクリーンショットして おくってください
+        </div>
+        <pre style={pre}>{msg}</pre>
+        {where && <pre style={{ ...pre, color: "#C9C4F0" }}>{where}</pre>}
+        {stack && <pre style={{ ...pre, color: "#8A85B8" }}>{stack}</pre>}
+        <div style={{ fontSize: 10, color: "#6F6A9C", marginTop: 8 }}>
+          {typeof APP_VERSION !== "undefined" ? "ver " + APP_VERSION : ""}
+        </div>
+        <button style={btn} onClick={() => location.reload()}>
+          もういちど ひらく
+        </button>
+        <button style={{ ...btn, background: "#3A3568", color: "#F5F3FF" }} onClick={() => this.exportData()}>
+          データを ほぞん
+        </button>
+      </div>
+    );
+  }
 }
 
 function MathMonsterBattle() {
@@ -8258,7 +8357,7 @@ const styles = {
 };
 
 
-ReactDOM.createRoot(document.getElementById("root")).render(<MathMonsterBattle />);
+ReactDOM.createRoot(document.getElementById("root")).render(<ErrorCatcher><MathMonsterBattle /></ErrorCatcher>);
 </script>
 </body>
 </html>
