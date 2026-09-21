@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20260912-075521";
+var APP_VERSION = "20260921-085752";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -746,7 +746,10 @@ const SOCIAL_MODES = [
   { id: "social-pref", label: "けんめい", emoji: "📍", desc: "しょざいち → けんめい" },
   { id: "social-region", label: "ちほう", emoji: "🧭", desc: "けん → ちほう" },
   { id: "social-spec", label: "とくさんひん", emoji: "🍎", desc: "けん → ゆうめいな もの" },
-  { id: "social-mix", label: "ぜんぶ", emoji: "🎲", desc: "4しゅるいから ランダム" },
+  { id: "social-industry", label: "工業地帯", emoji: "🏭", desc: "5年生の さんぎょう" },
+  { id: "social-mapsym", label: "地図記号", emoji: "🗺️", desc: "3〜4年生" },
+  { id: "social-geo", label: "日本の 地理", emoji: "🗻", desc: "山・川・平野" },
+  { id: "social-mix", label: "ぜんぶ", emoji: "🎲", desc: "ぜんぶから ランダム" },
 ];
 
 const MODE_GROUPS = [
@@ -771,7 +774,10 @@ const MODE_REWARD = {
   "social-pref": 1.5,
   "social-region": 1.2,
   "social-spec": 1.6,
-  "social-mix": 1.7,
+  "social-industry": 1.9,
+  "social-mapsym": 1.3,
+  "social-geo": 1.5,
+  "social-mix": 1.8,
   "india-11-15": 1.8,
   "india-16-19": 2.2,
   "india-square": 2.0,
@@ -793,7 +799,10 @@ const MODE_TIME = {
   "social-pref": 1.6,
   "social-region": 1.3,
   "social-spec": 1.7,
-  "social-mix": 1.7,
+  "social-industry": 1.9,
+  "social-mapsym": 1.5,
+  "social-geo": 1.6,
+  "social-mix": 1.8,
   "india-11-15": 1.3,
   "india-16-19": 1.4,
   "india-square": 1.2,
@@ -1058,12 +1067,54 @@ const SPECIALTIES = {
   "沖縄県": ["さとうきび", "ゴーヤ", "シーサー"],
 };
 
+// 工業地帯・工業地域(5年)
+const INDUSTRY = [
+  { name: "京浜工業地帯", prefs: ["東京都", "神奈川県"], feat: "東京と横浜を 中心に した 工業地帯" },
+  { name: "中京工業地帯", prefs: ["愛知県", "三重県"], feat: "自動車工業が とてもさかん" },
+  { name: "阪神工業地帯", prefs: ["大阪府", "兵庫県"], feat: "大阪と神戸を 中心に した 工業地帯" },
+  { name: "北九州工業地帯", prefs: ["福岡県"], feat: "むかし 鉄鋼業で さかえた" },
+  { name: "瀬戸内工業地域", prefs: ["岡山県", "広島県", "山口県", "香川県", "愛媛県"], feat: "瀬戸内海ぞいに ひろがる" },
+  { name: "東海工業地域", prefs: ["静岡県"], feat: "楽器や オートバイの 生産が さかん" },
+  { name: "京葉工業地域", prefs: ["千葉県"], feat: "石油化学工業が さかん" },
+  { name: "関東内陸工業地域", prefs: ["埼玉県", "群馬県", "栃木県"], feat: "海に めんしていない 工業地域" },
+  { name: "北陸工業地域", prefs: ["新潟県", "富山県", "石川県", "福井県"], feat: "日本海がわの 工業地域" },
+  { name: "鹿島臨海工業地域", prefs: ["茨城県"], feat: "ほりこみ式の みなとを つくった" },
+];
+
+// 地図記号(3〜4年)
+const MAP_SYMBOLS = [
+  { name: "けいさつしょ", hint: "×を まるで かこんだ しるし" },
+  { name: "ゆうびんきょく", hint: "〒の しるし" },
+  { name: "びょういん", hint: "十字を まるで かこんだ しるし" },
+  { name: "しょうぼうしょ", hint: "むかしの さすまたの しるし" },
+  { name: "がっこう", hint: "文の しるし" },
+  { name: "しやくしょ", hint: "まるの なかに てん" },
+  { name: "じんじゃ", hint: "とりいの しるし" },
+  { name: "おてら", hint: "卍の しるし" },
+  { name: "たんぼ", hint: "いねを かりとった あとの しるし" },
+  { name: "はたけ", hint: "ふたばの しるし" },
+  { name: "くだものばたけ", hint: "りんごの みの しるし" },
+  { name: "とうだい", hint: "ひかりを はなつ しるし" },
+];
+
+// 日本の 地理(4〜5年)
+const GEO_QA = [
+  { q: "日本で いちばん たかい 山", a: "富士山" },
+  { q: "日本で いちばん ながい 川", a: "信濃川" },
+  { q: "日本で いちばん ひろい 湖", a: "琵琶湖" },
+  { q: "日本で いちばん ひろい 平野", a: "関東平野" },
+  { q: "日本アルプスが ある ちほう", a: "中部" },
+  { q: "日本で いちばん おおきい 島", a: "本州" },
+  { q: "石狩平野が ある 県", a: "北海道" },
+  { q: "濃尾平野が ある 県", a: "愛知県" },
+];
+
 const REGIONS = ["北海道", "東北", "関東", "中部", "近畿", "中国", "四国", "九州"];
 
 // しゃかいの もんだいを つくる
 // kind: 'capital'(けんちょうしょざいち) / 'pref'(けんめい) / 'region'(ちほう) / 'mix'
 function makeSocialProblem(kind) {
-  const k = kind === "mix" ? pick(["capital", "pref", "region", "spec", "spec"]) : kind;
+  const k = kind === "mix" ? pick(["capital", "pref", "region", "spec", "spec", "industry", "mapsym", "geo"]) : kind;
   const [name, capital, region] = pick(PREFS);
 
   if (k === "capital") {
@@ -1093,6 +1144,58 @@ function makeSocialProblem(kind) {
       text: `${city}は どこの けん?`,
       answer: name,
       distractors: [...same, ...other].sort(() => Math.random() - 0.5).slice(0, 6),
+    };
+  }
+
+  // 工業地帯
+  if (k === "industry") {
+    const item = pick(INDUSTRY);
+    if (Math.random() < 0.5) {
+      // 工業地帯 → ある けん
+      const ans = pick(item.prefs);
+      const others = INDUSTRY.filter((x) => x.name !== item.name).flatMap((x) => x.prefs);
+      return {
+        text: `${item.name}が ある けんは?`,
+        answer: ans,
+        distractors: others.filter((x) => !item.prefs.includes(x)).sort(() => Math.random() - 0.5).slice(0, 6),
+      };
+    }
+    // とくちょう → 工業地帯
+    return {
+      text: `「${item.feat}」のは どこ?`,
+      answer: item.name,
+      distractors: INDUSTRY.filter((x) => x.name !== item.name)
+        .map((x) => x.name)
+        .sort(() => Math.random() - 0.5)
+        .slice(0, 6),
+    };
+  }
+
+  // 地図記号
+  if (k === "mapsym") {
+    const item = pick(MAP_SYMBOLS);
+    return {
+      text: `${item.hint}は?`,
+      answer: item.name,
+      distractors: MAP_SYMBOLS.filter((x) => x.name !== item.name)
+        .map((x) => x.name)
+        .sort(() => Math.random() - 0.5)
+        .slice(0, 6),
+    };
+  }
+
+  // 日本の 地理
+  if (k === "geo") {
+    const item = pick(GEO_QA);
+    return {
+      text: item.q + "は?",
+      answer: item.a,
+      distractors: [
+        ...GEO_QA.filter((x) => x.a !== item.a).map((x) => x.a),
+        ...PREFS.map((x) => x[0]).filter((x) => x !== item.a),
+      ]
+        .sort(() => Math.random() - 0.5)
+        .slice(0, 6),
     };
   }
 
@@ -1387,19 +1490,25 @@ function makeGradeProblem(grade) {
 }
 
 // インドしき: 11〜19の かけざん
-function makeIndiaProblem(kind) {
+function makeIndiaProblem(kind, weakInfo) {
   let a, b;
   if (kind === "square") {
     a = rnd(11, 19);
     b = a;
   } else if (kind === "11-15") {
-    a = rnd(11, 15);
+    a = weakInfo
+      ? weightedPick([11,12,13,14,15], weakInfo.indiaCorrect, weakInfo.indiaWrong)
+      : rnd(11, 15);
     b = rnd(2, 19);
   } else if (kind === "16-19") {
-    a = rnd(16, 19);
+    a = weakInfo
+      ? weightedPick([16,17,18,19], weakInfo.indiaCorrect, weakInfo.indiaWrong)
+      : rnd(16, 19);
     b = rnd(2, 19);
   } else {
-    a = rnd(11, 19);
+    a = weakInfo
+      ? weightedPick([11,12,13,14,15,16,17,18,19], weakInfo.indiaCorrect, weakInfo.indiaWrong)
+      : rnd(11, 19);
     b = rnd(11, 19);
   }
   const ans = a * b;
@@ -1422,11 +1531,34 @@ function makeIndiaProblem(kind) {
   };
 }
 
-function makeProblem(level, mode, selectedTables) {
+// にがてな だん(せいとうりつが ひくい)を おおめに えらぶ
+// records の tableCorrect / tableWrong を もとに おもみを つける
+function weightedPick(candidates, correctMap, wrongMap) {
+  const weights = candidates.map((n) => {
+    const c = (correctMap || {})[n] || 0;
+    const w = (wrongMap || {})[n] || 0;
+    const total = c + w;
+    if (total < 5) return 2.0; // まだ あまり といていない → すこし おおめ
+    const rate = c / total;
+    if (rate >= 0.9) return 0.6;  // とくい → へらす
+    if (rate >= 0.75) return 1.2;
+    if (rate >= 0.5) return 2.2;
+    return 3.2;                   // にがて → たくさん
+  });
+  const sum = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * sum;
+  for (let i = 0; i < candidates.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return candidates[i];
+  }
+  return candidates[candidates.length - 1];
+}
+
+function makeProblem(level, mode, selectedTables, weakInfo) {
   // インドしき 19×19
   if (mode && mode.startsWith("india-")) {
     const kind = mode.replace("india-", "");
-    const ip = makeIndiaProblem(kind);
+    const ip = makeIndiaProblem(kind, weakInfo);
     return { text: ip.text, answer: ip.answer, distractors: ip.distractors, kind: "india" };
   }
 
@@ -1448,10 +1580,15 @@ function makeProblem(level, mode, selectedTables) {
   if (mode !== "addsub") {
     let a;
     if (mode === "mul-random") {
-      a = Math.floor(Math.random() * 9) + 1;
+      // にがてな だんを おおめに
+      a = weakInfo
+        ? weightedPick([1,2,3,4,5,6,7,8,9], weakInfo.tableCorrect, weakInfo.tableWrong)
+        : Math.floor(Math.random() * 9) + 1;
     } else if (mode === "mul-pick") {
       const list = selectedTables && selectedTables.length ? selectedTables : [1];
-      a = list[Math.floor(Math.random() * list.length)];
+      a = weakInfo
+        ? weightedPick(list, weakInfo.tableCorrect, weakInfo.tableWrong)
+        : list[Math.floor(Math.random() * list.length)];
     } else {
       // "mul-1" 〜 "mul-9"
       a = parseInt(mode.split("-")[1], 10) || 1;
@@ -1595,9 +1732,9 @@ function formatTime(ms) {
   return m > 0 ? `${m}ふん${String(sec).padStart(2, "0")}びょう` : `${sec}びょう`;
 }
 
-function buildProblemState(stageNumber, difficulty, recentResults, mode, selectedTables) {
+function buildProblemState(stageNumber, difficulty, recentResults, mode, selectedTables, weakInfo) {
   const level = computeLevel(stageNumber, difficulty, recentResults);
-  const p = makeProblem(level, mode, selectedTables);
+  const p = makeProblem(level, mode, selectedTables, weakInfo);
   return {
     problem: p,
     choices: makeChoices(p),
@@ -2557,6 +2694,8 @@ function MathMonsterBattle() {
   const [chLeft, setChLeft] = useState(TIME_ATTACK_SEC);
   const [chResult, setChResult] = useState(null);
   const chTickRef = useRef(null);
+  // さいしんの endChallenge を いれておく いれもの
+  const endChallengeRef = useRef(() => {});
   // プロフィール(きょうだいで つかいわける)
   const [profiles, setProfiles] = useState(() => loadProfiles());
   const [activeId, setActiveId] = useState(() => loadActiveProfile(loadProfiles()));
@@ -2623,6 +2762,18 @@ function MathMonsterBattle() {
   const expFracRef = useRef(0);
 
   const statsBase = statsFor(owned, branch);
+  // にがてな だんを おおめに だす ための じょうほう
+  const weakInfo = {
+    tableCorrect: records.tableCorrect,
+    tableWrong: records.tableWrong,
+    indiaCorrect: records.indiaCorrect,
+    indiaWrong: records.indiaWrong,
+  };
+
+  // テンキーで こたえられる もんだいか(すうじ だけの こたえ)
+  const canUseKeypad = !!problem && /^[0-9]+(\.[0-9]+)?$/.test(problem.answer);
+  const useKeypad = inputMode === "keypad" && canUseKeypad;
+
   const stats = {
     ...statsBase,
     atk: statsBase.atk + rebirth,
@@ -2724,7 +2875,7 @@ function MathMonsterBattle() {
           setPlayerHp(data.playerHp ?? (st ? st.maxHp : STAGE_DEFS.egg.maxHp));
           stageStartPoints.current = data.points ?? 0;
 
-          const built = buildProblemState(sn, diff, [], data.mode ?? "addsub", data.selectedTables ?? [2, 3, 4, 5]);
+          const built = buildProblemState(sn, diff, [], data.mode ?? "addsub", data.selectedTables ?? [2, 3, 4, 5], weakInfo);
           setProblem(built.problem);
           setChoices(built.choices);
           const loadedMode = data.mode ?? "addsub";
@@ -2910,7 +3061,7 @@ function MathMonsterBattle() {
     stageStartPoints.current = 0;
     stageStartTime.current = Date.now();
     recentResultsRef.current = [];
-    const built = buildProblemState(1, difficulty, [], mode, selectedTables);
+    const built = buildProblemState(1, difficulty, [], mode, selectedTables, weakInfo);
     setProblem(built.problem);
     setChoices(built.choices);
     setTimeLimit(timeFor(built.timeLimit));
@@ -2971,7 +3122,7 @@ function MathMonsterBattle() {
           timeLimit: getTimeLimit(currentLevel || 1),
           level: currentLevel || 1,
         }
-      : buildProblemState(stageNumber, difficulty, recentResultsRef.current, mode, selectedTables);
+      : buildProblemState(stageNumber, difficulty, recentResultsRef.current, mode, selectedTables, weakInfo);
     setIsReview(!!review);
     setTyped("");
     setHintedChoices(null);
@@ -3062,11 +3213,7 @@ function MathMonsterBattle() {
   }
 
   function applyEnemyAttack() {
-    // テンキーで こたえられる もんだいか(すうじ だけの こたえ)
-  const canUseKeypad = !!problem && /^[0-9]+(\.[0-9]+)?$/.test(problem.answer);
-  const useKeypad = inputMode === "keypad" && canUseKeypad;
-
-  const enemy = currentEnemy();
+    const enemy = currentEnemy();
     const dmg = Math.max(1, enemy.atk - def);
     setFlashPlayer(true);
     setPlayerHp((hp) => Math.max(0, hp - dmg));
@@ -3193,7 +3340,7 @@ function MathMonsterBattle() {
         setFeedback(null);
         setFloatingText(null);
         setTyped("");
-        const built = buildProblemState(1, difficulty, recentResultsRef.current, mode, selectedTables);
+        const built = buildProblemState(1, difficulty, recentResultsRef.current, mode, selectedTables, weakInfo);
         setProblem(built.problem);
         setChoices(built.choices);
         setCurrentLevel(built.level);
@@ -3345,7 +3492,7 @@ function MathMonsterBattle() {
       stageStartTime.current = Date.now();
       setStageClear(null);
       setTab("battle");
-      const b2 = buildProblemState(nextFloor * BOSS_INTERVAL, difficulty, recentResultsRef.current, mode, selectedTables);
+      const b2 = buildProblemState(nextFloor * BOSS_INTERVAL, difficulty, recentResultsRef.current, mode, selectedTables, weakInfo);
       setProblem(b2.problem);
       setChoices(b2.choices);
       setTimeLimit(timeFor(b2.timeLimit));
@@ -3363,7 +3510,7 @@ function MathMonsterBattle() {
     stageWrongRef.current = 0;
     setStageClear(null);
     setTab("battle");
-    const built = buildProblemState(next, difficulty, recentResultsRef.current, mode, selectedTables);
+    const built = buildProblemState(next, difficulty, recentResultsRef.current, mode, selectedTables, weakInfo);
     setProblem(built.problem);
     setChoices(built.choices);
     setTimeLimit(timeFor(built.timeLimit));
@@ -3474,6 +3621,9 @@ function MathMonsterBattle() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawOpen, drawColor, drawSize, eraser]);
 
+  // さいしんの endChallenge を ref に いれておく(関数せんげんは まきあげ される)
+  endChallengeRef.current = endChallenge;
+
   // タイムアタックの カウントダウン
   useEffect(() => {
     if (challenge !== "timeattack" || screen !== "game") return;
@@ -3490,10 +3640,6 @@ function MathMonsterBattle() {
     return () => clearInterval(chTickRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [challenge, screen]);
-
-  // さいしんの endChallenge を もっておく
-  const endChallengeRef = useRef(() => {});
-  endChallengeRef.current = endChallenge;
 
   // アイテムの おしらせを じどうで けす
   useEffect(() => {
@@ -3666,7 +3812,7 @@ function MathMonsterBattle() {
     recentResultsRef.current = [];
     pointFracRef.current = 0;
     expFracRef.current = 0;
-    const built = buildProblemState(stageNumber, difficulty, [], mode, selectedTables);
+    const built = buildProblemState(stageNumber, difficulty, [], mode, selectedTables, weakInfo);
     setProblem(built.problem);
     setChoices(built.choices);
     setTimeLimit(timeFor(built.timeLimit));
@@ -4016,7 +4162,7 @@ function MathMonsterBattle() {
     reviewRef.current = [];
     setReviewCount(0);
     recentResultsRef.current = [];
-    const built = buildProblemState(1, difficulty, [], mode, selectedTables);
+    const built = buildProblemState(1, difficulty, [], mode, selectedTables, weakInfo);
     setProblem(built.problem);
     setChoices(built.choices);
     setCurrentLevel(built.level);
@@ -4053,7 +4199,7 @@ function MathMonsterBattle() {
     stageStartPoints.current = points;
     stageStartTime.current = Date.now();
     recentResultsRef.current = [];
-    const built = buildProblemState(BOSS_INTERVAL, difficulty, [], mode, selectedTables);
+    const built = buildProblemState(BOSS_INTERVAL, difficulty, [], mode, selectedTables, weakInfo);
     setProblem(built.problem);
     setChoices(built.choices);
     const lim = Math.round(built.timeLimit * ((BRANCH_BONUS[branch] && BRANCH_BONUS[branch].timeMult) || 1) * stageTimeFactor(BOSS_INTERVAL, true) * timeMultFor(mode) * diffTime(difficulty));
@@ -4109,7 +4255,7 @@ function MathMonsterBattle() {
     stageStartTime.current = Date.now();
     stageWrongRef.current = 0;
     recentResultsRef.current = [];
-    const built = buildProblemState(towerFloor * BOSS_INTERVAL, difficulty, [], mode, selectedTables);
+    const built = buildProblemState(towerFloor * BOSS_INTERVAL, difficulty, [], mode, selectedTables, weakInfo);
     setProblem(built.problem);
     setChoices(built.choices);
     const lim = Math.round(
@@ -5515,7 +5661,7 @@ function MathMonsterBattle() {
                 fontSize: problem.text.length > 13 ? 26 : problem.text.length > 9 ? 31 : 36,
               }}
             >
-              {problem.text} = ?
+              {/[?？]$/.test(problem.text) ? problem.text : `${problem.text} = ?`}
             </div>
           </div>
 
