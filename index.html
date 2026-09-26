@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20260921-094105";
+var APP_VERSION = "20260923-104043";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -497,8 +497,8 @@ const ACHIEVEMENTS = [
   // ---- せいかつ ----
   { id: "morning", emoji: "🌅", name: "あさがた", desc: "あさ(5〜9じ)に あそぶ",
     check: (r) => !!r.morningPlay },
-  { id: "night", emoji: "🌙", name: "よふかし", desc: "よる(20じ いこう)に あそぶ",
-    check: (r) => !!r.nightPlay },
+  { id: "morning10", emoji: "☀️", name: "あさの しゅうかん", desc: "あさ(5〜9じ)に 10日 あそぶ",
+    check: (r) => (r.morningDays || 0) >= 10 },
   { id: "allsubj", emoji: "🎒", name: "3きょうか せいは", desc: "1日で さんすう・19×19・しゃかいを ぜんぶ あそぶ",
     check: (r) => !!r.allSubjectsDay },
 
@@ -2753,7 +2753,7 @@ function MathMonsterBattle() {
     bestTimeAttack: 0,   // 60びょうで といた さいこう もんすう
     bestSurvival: 0,     // サバイバルの さいこう れんぞく
     morningPlay: false,  // あさ(5〜9じ)に あそんだ
-    nightPlay: false,    // よる(20じ いこう)に あそんだ
+    morningDays: 0,      // あさに あそんだ 日すう
     subjectsToday: [],   // きょう あそんだ きょうか
     allSubjectsDay: false, // 1日で 3きょうか ぜんぶ
     gradeCorrect: {},
@@ -3130,7 +3130,7 @@ function MathMonsterBattle() {
       bestTimeAttack: 0,
       bestSurvival: 0,
       morningPlay: false,
-      nightPlay: false,
+      morningDays: 0,
       subjectsToday: [],
       allSubjectsDay: false,
       gradeCorrect: {},
@@ -3326,8 +3326,14 @@ function MathMonsterBattle() {
       const next = { ...r };
       // じかんたい(あさ・よる)
       const hour = new Date().getHours();
-      if (hour >= 5 && hour < 9) next.morningPlay = true;
-      if (hour >= 20) next.nightPlay = true;
+      if (hour >= 5 && hour < 9) {
+        next.morningPlay = true;
+        // あさに あそんだ 日を かぞえる(おなじ日は 1かいだけ)
+        if (r.lastMorningDay !== day) {
+          next.lastMorningDay = day;
+          next.morningDays = (r.morningDays || 0) + 1;
+        }
+      }
 
       // きょう あそんだ きょうか
       const subj = curMode && curMode.startsWith("social-")
