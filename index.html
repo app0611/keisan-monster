@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20260923-104043";
+var APP_VERSION = "20261002-235635";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -3182,6 +3182,7 @@ function MathMonsterBattle() {
       text: prob.text,
       answer: prob.answer,
       distractors: prob.distractors || [],
+      mode, // どの モードの もんだいか(ちがう モードでは ださない)
       due: 3, // 3もんご に もういちど だす
       miss: Math.min(3, (before?.miss || 0) + 1),
     });
@@ -3199,8 +3200,11 @@ function MathMonsterBattle() {
 
   // つぎに だす ふくしゅうもんだいが あれば とりだす
   function takeReview() {
-    reviewRef.current = reviewRef.current.map((x) => ({ ...x, due: x.due - 1 }));
-    const idx = reviewRef.current.findIndex((x) => x.due <= 0);
+    // いまの モードの もんだいだけ じかんを すすめる
+    reviewRef.current = reviewRef.current.map((x) =>
+      x.mode === mode ? { ...x, due: x.due - 1 } : x
+    );
+    const idx = reviewRef.current.findIndex((x) => x.mode === mode && x.due <= 0);
     if (idx < 0) return null;
     const item = reviewRef.current[idx];
     reviewRef.current[idx] = { ...item, due: 8 };
