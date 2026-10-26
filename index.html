@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20261002-235635";
+var APP_VERSION = "20261027-054140";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -266,7 +266,1230 @@ const BOSS_INTERVAL = 3;
 // ---------- チャレンジ(バトルとは べつの あそびかた) ----------
 const TIME_ATTACK_SEC = 60; // タイムアタックの じかん
 
-// ---------- けいけんち ----------
+// ---------- つうしん たいせん(デジモンふう) ----------
+// いままでの けいさんの せいかが そのまま つよさに なる
+// なまえ / すがた / ステータス だけを やりとりする(こじんじょうほうは いれない)
+
+// きろくから バトルステータスを つくる
+function battleStats(save) {
+  const r = (save && save.records) || {};
+  const owned = save.owned || [];
+  const branch = save.branch || null;
+  const st = statsFor(owned, branch);
+  // いまの すがたを もとめる(アプリ本体と おなじ けいさん)
+  // stagePathFor は {id, ...} の はいれつを かえす
+  const path = stagePathFor(branch);
+  const exp = save.exp || 0;
+  let idx = 0;
+  path.forEach((stg, i) => {
+    if (stg && exp >= Math.ceil((stg.threshold || 0) * st.thresholdMult)) idx = i;
+  });
+  const cur = path[idx] || path[0];
+  const stageId = (cur && cur.id) || "egg";
+  const def = STAGE_DEFS[stageId] || STAGE_DEFS.egg;
+
+  const correct = save.correctCount || 0;
+  const fast = Object.values(r.kukuFast || {}).reduce((a, b) => a + b, 0);
+  const perfect = r.perfectStages || 0;
+  const crit = r.critCount || 0;
+  const boss = r.bossDefeated || 0;
+  const rebirth = save.rebirth || 0;
+
+  // どれも「たくさん やるほど のびるが、だんだん のびにくく なる」かたち
+  const grow = (n, k) => Math.round(Math.sqrt(Math.max(0, n)) * k);
+
+  return {
+    name: def.name,
+    stageId,
+    branch,
+    artStyle: save.artStyle || "deformed",
+    skin: (save.myMonsters || []).find((m) => m.id === save.skinId) || null,
+    hat: (save.equipped && save.equipped.hat) || null,
+    rebirth,
+    // さいだいHP: そだてた だんかい + つうさん せいかい
+    hp: (def.maxHp || 20) + st.bonusHp + grow(correct, 2.2) + rebirth * 12,
+    // こうげき: つうさん せいかい + ボスげきは + そうび
+    atk: 4 + st.atk + grow(correct, 0.55) + grow(boss, 1.1) + rebirth,
+    // まもり: ノーミスクリア + そうび
+    def: st.def + grow(perfect, 0.9),
+    // すばやさ: はやく こたえた かいすう(せんこうを とる)
+    spd: 5 + grow(fast, 1.2) + grow(crit, 0.5),
+    // かいしんりつ: 会心を だした かいすう
+    crit: Math.min(0.4, 0.05 + Math.sqrt(Math.max(0, crit)) * 0.012),
+  };
+}
+
+// ルートごとの ひっさつわざ
+const SKILLS = {
+  surikara: { name: "まめつぶて", emoji: "💥", desc: "つよい いちげき", power: 2.1, heal: 0, hits: 1 },
+  gekkopika: { name: "れんぞくづき", emoji: "⚡", desc: "3かい こうげき", power: 0.85, heal: 0, hits: 3 },
+  special: { name: "たての かまえ", emoji: "🛡️", desc: "はんげきして かいふく", power: 1.3, heal: 0.12, hits: 1 },
+  iris: { name: "きらめき", emoji: "✨", desc: "こうげきしながら かいふく", power: 1.4, heal: 0.1, hits: 1 },
+  default: { name: "たいあたり", emoji: "💫", desc: "ふつうの こうげき", power: 1.5, heal: 0, hits: 1 },
+};
+
+function skillFor(branch) {
+  return SKILLS[branch] || SKILLS.default;
+}
+
+// そうごうりょく(どれくらい つよいか の めやす)
+function battlePower(s) {
+  return Math.round((s.hp * 0.45 + s.atk * 5 + s.def * 2.5 + s.spd * 1.2) * (1 + s.crit));
+}
+
+// よわい ほうに「がんばりブースト」。
+// つよさの さを 7わり うめる。やりこんだ ほうが つよいままで、
+// 2ばいの さでも 3かいに 1かいは かてるくらいに なる
+const BOOST_RATE = 0.7;
+function withBoost(me, opp, on) {
+  const pm = battlePower(me);
+  const po = battlePower(opp);
+  if (!on || pm >= po || pm <= 0) return { ...me, boost: 1 };
+  const k = 1 + (po / pm - 1) * BOOST_RATE;
+  return {
+    ...me,
+    hp: Math.round(me.hp * k),
+    atk: Math.round(me.atk * k),
+    def: Math.round(me.def * k),
+    boost: k,
+  };
+}
+
+// おなじ たねから おなじ ながれを つくる(りょうほうの たんまつで おなじ しあいに なる)
+function makeRng(seed) {
+  let x = seed >>> 0 || 1;
+  return function () {
+    x ^= x << 13; x >>>= 0;
+    x ^= x >> 17;
+    x ^= x << 5; x >>>= 0;
+    return x / 4294967296;
+  };
+}
+
+// もじれつから たねを つくる
+function seedFrom(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+// たたかいを さいごまで けいさんして、1ターンずつの きろくを かえす
+// おなじ たね なら どちらの たんまつでも まったく おなじ しあいに なる
+function simulateBattle(rawA, rawB, seed, boostOn = true) {
+  const rng = makeRng(seed);
+  const a = withBoost(rawA, rawB, boostOn);
+  const b = withBoost(rawB, rawA, boostOn);
+  const log = [];
+  const hp = [a.hp, b.hp];
+  const fighters = [a, b];
+
+  // はやい ほうが せんこうを とりやすい(でも たまに ぎゃくも ある)
+  let turn;
+  if (a.spd === b.spd) turn = rng() < 0.5 ? 0 : 1;
+  else {
+    const faster = a.spd > b.spd ? 0 : 1;
+    turn = rng() < 0.75 ? faster : 1 - faster;
+  }
+  log.push({ type: "start", first: turn, a, b });
+
+  for (let t = 0; t < 80; t++) {
+    const me = fighters[turn];
+    const you = fighters[1 - turn];
+    const sk = skillFor(me.branch);
+
+    // ねばり: HPが へっているほど がんばる
+    const pinch = hp[turn] / me.hp <= 0.35;
+    const useSkill = rng() < (pinch ? 0.5 : 0.3);
+    const hits = useSkill ? sk.hits : 1;
+    let total = 0;
+    let crit = false;
+    let missed = 0;
+
+    for (let h = 0; h < hits; h++) {
+      const isCrit = rng() < Math.min(0.6, me.crit + (pinch ? 0.15 : 0));
+      if (isCrit) crit = true;
+      // かわす
+      if (rng() < Math.min(0.15, (you.spd / (you.spd + me.spd)) * 0.18)) {
+        missed++;
+        continue;
+      }
+      const base = me.atk * (useSkill ? sk.power : 1) * (pinch ? 1.35 : 1);
+      total += Math.max(
+        1,
+        Math.round((base - you.def * 0.5) * (0.7 + rng() * 0.6) * (isCrit ? 1.8 : 1))
+      );
+    }
+
+    if (missed > 0 && total === 0) {
+      log.push({ type: "miss", by: turn, hpA: hp[0], hpB: hp[1] });
+    }
+    if (total > 0) {
+      hp[1 - turn] = Math.max(0, hp[1 - turn] - total);
+      log.push({
+        type: "attack",
+        by: turn,
+        skill: useSkill ? sk : null,
+        dmg: total,
+        crit,
+        pinch,
+        hpA: hp[0],
+        hpB: hp[1],
+      });
+      if (useSkill && sk.heal > 0 && hp[turn] > 0) {
+        const heal = Math.round(me.hp * sk.heal);
+        hp[turn] = Math.min(me.hp, hp[turn] + heal);
+        log.push({ type: "heal", by: turn, amount: heal, hpA: hp[0], hpB: hp[1] });
+      }
+    }
+
+    if (hp[1 - turn] <= 0) {
+      log.push({ type: "win", by: turn, hpA: hp[0], hpB: hp[1] });
+      return { log, winner: turn, hp, a, b };
+    }
+    turn = 1 - turn;
+  }
+  const winner = hp[0] === hp[1] ? -1 : hp[0] > hp[1] ? 0 : 1;
+  log.push({ type: "timeup", winner, hpA: hp[0], hpB: hp[1] });
+  return { log, winner, hp, a, b };
+}
+
+// りょうほうの たんまつで まったく おなじ しあいに するための しくみ。
+// 2つの コードを ならべかえて じゅんばんを きめ、かならず おなじ じゅんで けいさんする。
+// そのあと「じぶんが ひだり」に なるよう ならべなおす。
+function runMatch(myStats, myCode, oppStats, oppCode, boostOn) {
+  // コードに すると すうじが まるめられる。
+  // りょうほうを おなじ まるめかたに そろえて、たんまつで さが でないようにする
+  const norm = (st, code) => {
+    const back = decodeCard(code);
+    return back ? { ...st, ...back } : st;
+  };
+  const meN = norm(myStats, myCode);
+  const oppN = norm(oppStats, oppCode);
+
+  const meFirst = String(myCode) <= String(oppCode);
+  const seed = seedFrom([String(myCode), String(oppCode)].sort().join("|"));
+  const first = meFirst ? meN : oppN;
+  const second = meFirst ? oppN : meN;
+  const raw = simulateBattle(first, second, seed, boostOn);
+  if (meFirst) return raw;
+  // じぶんが あとだった ばあいは ひだり・みぎを いれかえる
+  const flip = (i) => (i === 0 ? 1 : i === 1 ? 0 : i);
+  return {
+    a: raw.b,
+    b: raw.a,
+    hp: [raw.hp[1], raw.hp[0]],
+    winner: flip(raw.winner),
+    log: raw.log.map((e) => ({
+      ...e,
+      by: typeof e.by === "number" ? flip(e.by) : e.by,
+      first: typeof e.first === "number" ? flip(e.first) : e.first,
+      winner: typeof e.winner === "number" ? flip(e.winner) : e.winner,
+      hpA: typeof e.hpA === "number" ? e.hpB : e.hpA,
+      hpB: typeof e.hpB === "number" ? e.hpA : e.hpB,
+    })),
+  };
+}
+
+// ---------- たいせんカード(あいてに わたす じょうほう) ----------
+// なまえ・すがた・つよさ だけ。えや きろくの なかみは いれない。
+// QRに しやすいよう、ちいさな バイナリに して base64 に する。
+const CARD_STAGES = Object.keys(STAGE_DEFS);
+const CARD_BRANCHES = ["", "surikara", "gekkopika", "special", "iris"];
+
+function encodeCard(st, playerName) {
+  const nameBytes = new TextEncoder().encode(String(playerName || "プレイヤー").slice(0, 8));
+  const n = Math.min(nameBytes.length, 30);
+  const buf = new Uint8Array(12 + n);
+  const clamp = (v, max) => Math.max(0, Math.min(max, Math.round(Number(v) || 0)));
+  const hatIdx = st.hat ? GACHA_ITEMS.findIndex((g) => g.id === st.hat) + 1 : 0;
+  buf[0] = 2; // かたちの ばんごう
+  buf[1] = clamp(Math.max(0, CARD_STAGES.indexOf(st.stageId)), 255);
+  buf[2] = clamp(Math.max(0, CARD_BRANCHES.indexOf(st.branch || "")), 255);
+  buf[3] = clamp(st.rebirth, 255);
+  const hp = clamp(st.hp, 65535);
+  buf[4] = hp >> 8;
+  buf[5] = hp & 255;
+  buf[6] = clamp(st.atk, 255);
+  buf[7] = clamp(st.def, 255);
+  buf[8] = clamp(st.spd, 255);
+  buf[9] = clamp(st.crit * 100, 100);
+  buf[10] = clamp(hatIdx, 255);
+  buf[11] = n;
+  buf.set(nameBytes.slice(0, n), 12);
+  let bin = "";
+  buf.forEach((b) => (bin += String.fromCharCode(b)));
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function decodeCard(code) {
+  try {
+    const clean = String(code).trim().replace(/\s/g, "").replace(/-/g, "+").replace(/_/g, "/");
+    if (!clean) return null;
+    const pad = clean + "=".repeat((4 - (clean.length % 4)) % 4);
+    const bin = atob(pad);
+    const bytes = Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
+
+    // むかしの かたち(JSON)も よめるように しておく
+    if (bin.charCodeAt(0) === 123) {
+      const o = JSON.parse(new TextDecoder().decode(bytes));
+      if (!o || !o.m) return null;
+      const num = (x, min, max, d) => {
+        const v = Number(x);
+        return Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : d;
+      };
+      return {
+        player: String(o.n || "あいて").slice(0, 8),
+        name: String(o.m).slice(0, 12),
+        stageId: STAGE_DEFS[o.s] ? o.s : "egg",
+        branch: o.b || null,
+        rebirth: num(o.r, 0, 99, 0),
+        hp: num(o.h, 10, 9999, 50),
+        atk: num(o.a, 1, 999, 5),
+        def: num(o.d, 0, 999, 0),
+        spd: num(o.p, 1, 999, 5),
+        crit: num(o.c, 0, 100, 5) / 100,
+        hat: o.t || null,
+        artStyle: "deformed",
+        skin: null,
+      };
+    }
+
+    if (bytes.length < 12 || bytes[0] !== 2) return null;
+    const n = Math.min(bytes[11], Math.max(0, bytes.length - 12));
+    const player = new TextDecoder().decode(bytes.slice(12, 12 + n)) || "あいて";
+    const stageId = CARD_STAGES[bytes[1]] || "egg";
+    const branch = CARD_BRANCHES[bytes[2]] || null;
+    const hat = bytes[10] > 0 && GACHA_ITEMS[bytes[10] - 1] ? GACHA_ITEMS[bytes[10] - 1].id : null;
+    return {
+      player: player.slice(0, 8),
+      name: (STAGE_DEFS[stageId] || STAGE_DEFS.egg).name,
+      stageId,
+      branch: branch || null,
+      rebirth: bytes[3],
+      hp: Math.max(10, (bytes[4] << 8) | bytes[5]),
+      atk: Math.max(1, bytes[6]),
+      def: bytes[7],
+      spd: Math.max(1, bytes[8]),
+      crit: Math.min(1, bytes[9] / 100),
+      hat,
+      artStyle: "deformed",
+      skin: null,
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// ---------- QRコード を つくる ----------
+// そとの ライブラリを つかわず くみたてる。ごかんレベル M・マスク0・バージョン1〜6。
+// [そうバイト, ECCバイト/ブロック, G1ブロック, G1データ, G2ブロック, G2データ]
+const QR_EC = {
+  1: [26, 10, 1, 16, 0, 0],
+  2: [44, 16, 1, 28, 0, 0],
+  3: [70, 26, 1, 44, 0, 0],
+  4: [100, 18, 2, 32, 0, 0],
+  5: [134, 24, 2, 43, 0, 0],
+  6: [172, 16, 4, 27, 0, 0],
+};
+const QR_ALIGN = { 1: [], 2: [6, 18], 3: [6, 22], 4: [6, 26], 5: [6, 30], 6: [6, 34] };
+
+// ガロアたい(リードソロモン ふごうの ため)
+const QR_EXP = new Array(512);
+const QR_LOG = new Array(256);
+(function initGF() {
+  let x = 1;
+  for (let i = 0; i < 255; i++) {
+    QR_EXP[i] = x;
+    QR_LOG[x] = i;
+    x <<= 1;
+    if (x & 0x100) x ^= 0x11d;
+  }
+  for (let i = 255; i < 512; i++) QR_EXP[i] = QR_EXP[i - 255];
+})();
+function gfMul(a, b) {
+  return a === 0 || b === 0 ? 0 : QR_EXP[QR_LOG[a] + QR_LOG[b]];
+}
+function rsGenerator(n) {
+  let poly = [1];
+  for (let i = 0; i < n; i++) {
+    const next = new Array(poly.length + 1).fill(0);
+    for (let j = 0; j < poly.length; j++) {
+      next[j] ^= poly[j];
+      next[j + 1] ^= gfMul(poly[j], QR_EXP[i]);
+    }
+    poly = next;
+  }
+  return poly;
+}
+function rsEncode(data, ecLen) {
+  const gen = rsGenerator(ecLen);
+  const res = new Array(ecLen).fill(0);
+  for (let i = 0; i < data.length; i++) {
+    const factor = data[i] ^ res[0];
+    res.shift();
+    res.push(0);
+    if (factor !== 0) for (let j = 0; j < ecLen; j++) res[j] ^= gfMul(gen[j + 1], factor);
+  }
+  return res;
+}
+
+// もじれつ から ますめ(true=くろ)を つくる。ながすぎたら null
+function makeQr(text) {
+  const bytes = new TextEncoder().encode(text);
+  let ver = 0;
+  for (let v = 1; v <= 6; v++) {
+    const [, , g1, d1, g2, d2] = QR_EC[v];
+    if (g1 * d1 + g2 * d2 >= bytes.length + 2) {
+      ver = v;
+      break;
+    }
+  }
+  if (!ver) return null;
+
+  const [, ecLen, g1, d1, g2, d2] = QR_EC[ver];
+  const totalData = g1 * d1 + g2 * d2;
+
+  // ビットならべ(バイトモード・ながさ8ビット)
+  const bits = [];
+  const push = (val, n) => {
+    for (let i = n - 1; i >= 0; i--) bits.push((val >> i) & 1);
+  };
+  push(4, 4);
+  push(bytes.length, 8);
+  bytes.forEach((b) => push(b, 8));
+  for (let i = 0; i < 4 && bits.length < totalData * 8; i++) bits.push(0);
+  while (bits.length % 8) bits.push(0);
+  const dataBytes = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    let v = 0;
+    for (let j = 0; j < 8; j++) v = (v << 1) | bits[i + j];
+    dataBytes.push(v);
+  }
+  const PADS = [0xec, 0x11];
+  let pi = 0;
+  while (dataBytes.length < totalData) dataBytes.push(PADS[pi++ % 2]);
+
+  // ブロックごとに ECC
+  const blocks = [];
+  let pos = 0;
+  for (let i = 0; i < g1; i++) {
+    const d = dataBytes.slice(pos, pos + d1);
+    pos += d1;
+    blocks.push({ d, e: rsEncode(d, ecLen) });
+  }
+  for (let i = 0; i < g2; i++) {
+    const d = dataBytes.slice(pos, pos + d2);
+    pos += d2;
+    blocks.push({ d, e: rsEncode(d, ecLen) });
+  }
+  const final = [];
+  const maxD = Math.max(d1, d2);
+  for (let i = 0; i < maxD; i++)
+    blocks.forEach((b) => {
+      if (i < b.d.length) final.push(b.d[i]);
+    });
+  for (let i = 0; i < ecLen; i++) blocks.forEach((b) => final.push(b.e[i]));
+
+  // ますめ
+  const size = ver * 4 + 17;
+  const m = Array.from({ length: size }, () => new Array(size).fill(null));
+
+  const setFinder = (r0, c0) => {
+    for (let r = -1; r <= 7; r++)
+      for (let c = -1; c <= 7; c++) {
+        const rr = r0 + r;
+        const cc = c0 + c;
+        if (rr < 0 || cc < 0 || rr >= size || cc >= size) continue;
+        m[rr][cc] =
+          (r >= 0 && r <= 6 && (c === 0 || c === 6)) ||
+          (c >= 0 && c <= 6 && (r === 0 || r === 6)) ||
+          (r >= 2 && r <= 4 && c >= 2 && c <= 4);
+      }
+  };
+  setFinder(0, 0);
+  setFinder(0, size - 7);
+  setFinder(size - 7, 0);
+
+  // そろえ マーク
+  const al = QR_ALIGN[ver];
+  for (let i = 0; i < al.length; i++)
+    for (let j = 0; j < al.length; j++) {
+      const r = al[i];
+      const c = al[j];
+      if (m[r][c] !== null) continue;
+      for (let dr = -2; dr <= 2; dr++)
+        for (let dc = -2; dc <= 2; dc++)
+          m[r + dr][c + dc] = Math.max(Math.abs(dr), Math.abs(dc)) !== 1;
+    }
+
+  // タイミング
+  for (let i = 8; i < size - 8; i++) {
+    if (m[6][i] === null) m[6][i] = i % 2 === 0;
+    if (m[i][6] === null) m[i][6] = i % 2 === 0;
+  }
+
+  // かたちじょうほう の ばしょを ふさぐ(あとで ほんとうの あたいを いれる)
+  const fmt = 0x5412; // レベル M + マスク0
+  for (let i = 0; i < 15; i++) {
+    const mod = ((fmt >> i) & 1) === 1;
+    if (i < 6) m[i][8] = mod;
+    else if (i < 8) m[i + 1][8] = mod;
+    else m[size - 15 + i][8] = mod;
+    if (i < 8) m[8][size - i - 1] = mod;
+    else if (i < 9) m[8][15 - i - 1 + 1] = mod;
+    else m[8][15 - i - 1] = mod;
+  }
+  m[size - 8][8] = true;
+
+  // データを ジグザグに いれる(あいている ところだけ)
+  let byteIndex = 0;
+  let bitIndex = 7;
+  let inc = -1;
+  let row = size - 1;
+  for (let col = size - 1; col > 0; col -= 2) {
+    if (col === 6) col--;
+    for (;;) {
+      for (let c = 0; c < 2; c++) {
+        if (m[row][col - c] === null) {
+          let dark = false;
+          if (byteIndex < final.length) dark = ((final[byteIndex] >>> bitIndex) & 1) === 1;
+          if ((row + (col - c)) % 2 === 0) dark = !dark; // マスク0
+          m[row][col - c] = dark;
+          bitIndex--;
+          if (bitIndex === -1) {
+            byteIndex++;
+            bitIndex = 7;
+          }
+        }
+      }
+      row += inc;
+      if (row < 0 || row >= size) {
+        row -= inc;
+        inc = -inc;
+        break;
+      }
+    }
+  }
+  return m.map((r) => r.map((v) => v === true));
+}
+
+// ---------- QR よみとり(カメラ) ----------
+// ガロアたいの ほじょ(わりざん・ぎゃくすう・べき)
+function gfInv(a) {
+  return QR_EXP[255 - QR_LOG[a]];
+}
+function gfDiv(a, b) {
+  return a === 0 ? 0 : QR_EXP[(QR_LOG[a] + 255 - QR_LOG[b]) % 255];
+}
+function gfPow(a, n) {
+  let e = (QR_LOG[a] * n) % 255;
+  if (e < 0) e += 255;
+  return QR_EXP[e];
+}
+function qPolyEval(p, x) {
+  let y = p[0];
+  for (let i = 1; i < p.length; i++) y = gfMul(y, x) ^ p[i];
+  return y;
+}
+function qPolyScale(p, s) {
+  return p.map((v) => gfMul(v, s));
+}
+function qPolyAddEnd(a, b) {
+  const n = Math.max(a.length, b.length);
+  const r = new Array(n).fill(0);
+  for (let i = 0; i < a.length; i++) r[n - a.length + i] ^= a[i];
+  for (let i = 0; i < b.length; i++) r[n - b.length + i] ^= b[i];
+  return r;
+}
+
+// あやまりを なおして データぶぶんを かえす
+function rsCorrect(msg, ecLen) {
+  const n = msg.length;
+  const S = new Array(ecLen);
+  let bad = false;
+  for (let i = 0; i < ecLen; i++) {
+    S[i] = qPolyEval(msg, gfPow(2, i));
+    if (S[i] !== 0) bad = true;
+  }
+  if (!bad) return msg.slice(0, n - ecLen);
+  let errLoc = [1];
+  let oldLoc = [1];
+  for (let i = 0; i < ecLen; i++) {
+    let delta = S[i];
+    for (let j = 1; j < errLoc.length; j++) {
+      const k = i - j;
+      if (k < 0) break;
+      delta ^= gfMul(errLoc[errLoc.length - 1 - j], S[k]);
+    }
+    oldLoc = oldLoc.concat([0]);
+    if (delta !== 0) {
+      if (oldLoc.length > errLoc.length) {
+        const neo = qPolyScale(oldLoc, delta);
+        oldLoc = qPolyScale(errLoc, gfInv(delta));
+        errLoc = neo;
+      }
+      errLoc = qPolyAddEnd(errLoc, qPolyScale(oldLoc, delta));
+    }
+  }
+  while (errLoc.length > 1 && errLoc[0] === 0) errLoc = errLoc.slice(1);
+  const e = errLoc.length - 1;
+  if (e <= 0 || e * 2 > ecLen) return null;
+  const pos = [];
+  for (let i = 0; i < 255; i++) {
+    if (qPolyEval(errLoc, gfPow(2, i)) !== 0) continue;
+    const p = (255 - i) % 255;
+    if (p >= n) return null;
+    pos.push(p);
+  }
+  if (pos.length !== e) return null;
+  const X = pos.map((p) => gfPow(2, p));
+  const M = [];
+  const V = [];
+  for (let i = 0; i < e; i++) {
+    M.push(X.map((x) => gfPow(x, i)));
+    V.push(S[i]);
+  }
+  for (let c = 0; c < e; c++) {
+    let pv = -1;
+    for (let r = c; r < e; r++)
+      if (M[r][c] !== 0) {
+        pv = r;
+        break;
+      }
+    if (pv < 0) return null;
+    if (pv !== c) {
+      const t = M[pv];
+      M[pv] = M[c];
+      M[c] = t;
+      const u = V[pv];
+      V[pv] = V[c];
+      V[c] = u;
+    }
+    const d = M[c][c];
+    for (let k = c; k < e; k++) M[c][k] = gfDiv(M[c][k], d);
+    V[c] = gfDiv(V[c], d);
+    for (let r = 0; r < e; r++) {
+      if (r === c || M[r][c] === 0) continue;
+      const f = M[r][c];
+      for (let k = c; k < e; k++) M[r][k] ^= gfMul(M[c][k], f);
+      V[r] ^= gfMul(V[c], f);
+    }
+  }
+  const out = msg.slice();
+  for (let k = 0; k < e; k++) {
+    const idx = n - 1 - pos[k];
+    if (idx < 0 || idx >= n) return null;
+    out[idx] ^= V[k];
+  }
+  for (let i = 0; i < ecLen; i++) if (qPolyEval(out, gfPow(2, i)) !== 0) return null;
+  return out.slice(0, n - ecLen);
+}
+
+// ---------- しろくろに わける(ブロックごとの へいきん) ----------
+function binarize(gray, w, h) {
+  const BS = 8;
+  const bw = Math.max(1, Math.ceil(w / BS));
+  const bh = Math.max(1, Math.ceil(h / BS));
+  const avg = new Float32Array(bw * bh);
+  for (let by = 0; by < bh; by++) {
+    for (let bx = 0; bx < bw; bx++) {
+      let sum = 0;
+      let cnt = 0;
+      let mn = 255;
+      let mx = 0;
+      for (let y = by * BS; y < Math.min(h, (by + 1) * BS); y++) {
+        for (let x = bx * BS; x < Math.min(w, (bx + 1) * BS); x++) {
+          const v = gray[y * w + x];
+          sum += v;
+          cnt++;
+          if (v < mn) mn = v;
+          if (v > mx) mx = v;
+        }
+      }
+      let t = cnt ? sum / cnt : 128;
+      if (mx - mn <= 24) {
+        // むじの ブロック: まわりより あかるければ しろ あつかい
+        t = mn / 2;
+        if (bx > 0 && by > 0) {
+          const near = avg[by * bw + bx - 1];
+          if (mn < near) t = near;
+        }
+      }
+      avg[by * bw + bx] = t;
+    }
+  }
+  const sm = new Float32Array(bw * bh);
+  for (let by = 0; by < bh; by++)
+    for (let bx = 0; bx < bw; bx++) {
+      let s = 0;
+      let c = 0;
+      for (let dy = -2; dy <= 2; dy++)
+        for (let dx = -2; dx <= 2; dx++) {
+          const yy = by + dy;
+          const xx = bx + dx;
+          if (yy < 0 || xx < 0 || yy >= bh || xx >= bw) continue;
+          s += avg[yy * bw + xx];
+          c++;
+        }
+      sm[by * bw + bx] = s / c;
+    }
+  const bin = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const by = Math.min(bh - 1, y >> 3);
+    for (let x = 0; x < w; x++) {
+      const bx = Math.min(bw - 1, x >> 3);
+      bin[y * w + x] = gray[y * w + x] < sm[by * bw + bx] ? 1 : 0;
+    }
+  }
+  return bin;
+}
+
+// ---------- ファインダー(すみの しかく)を さがす ----------
+function crossCheck(bin, w, h, cx, cy, horiz, maxCount) {
+  // ちゅうしん から りょうがわに のばして 1:1:3:1:1 を たしかめる
+  const counts = [0, 0, 0, 0, 0];
+  const get = (i) => (horiz ? bin[cy * w + i] : bin[i * w + cx]);
+  const lim = horiz ? w : h;
+  let i = horiz ? cx : cy;
+  const start = i;
+  while (i >= 0 && get(i)) {
+    counts[2]++;
+    i--;
+  }
+  if (i < 0) return null;
+  while (i >= 0 && !get(i) && counts[1] <= maxCount) {
+    counts[1]++;
+    i--;
+  }
+  if (i < 0 || counts[1] > maxCount) return null;
+  while (i >= 0 && get(i) && counts[0] <= maxCount) {
+    counts[0]++;
+    i--;
+  }
+  if (counts[0] > maxCount) return null;
+  i = start + 1;
+  while (i < lim && get(i)) {
+    counts[2]++;
+    i++;
+  }
+  if (i >= lim) return null;
+  while (i < lim && !get(i) && counts[3] <= maxCount) {
+    counts[3]++;
+    i++;
+  }
+  if (i >= lim || counts[3] > maxCount) return null;
+  while (i < lim && get(i) && counts[4] <= maxCount) {
+    counts[4]++;
+    i++;
+  }
+  if (counts[4] > maxCount) return null;
+  const total = counts[0] + counts[1] + counts[2] + counts[3] + counts[4];
+  if (!checkRatio(counts)) return null;
+  // ちゅうしん いち
+  let end = i;
+  const center = end - counts[4] - counts[3] - counts[2] / 2;
+  return { center, total };
+}
+
+function checkRatio(c) {
+  const total = c[0] + c[1] + c[2] + c[3] + c[4];
+  if (total < 7) return false;
+  const mod = total / 7;
+  const tol = mod * 0.6;
+  return (
+    Math.abs(mod - c[0]) < tol &&
+    Math.abs(mod - c[1]) < tol &&
+    Math.abs(3 * mod - c[2]) < 3 * tol &&
+    Math.abs(mod - c[3]) < tol &&
+    Math.abs(mod - c[4]) < tol
+  );
+}
+
+function addCand(cands, fx, fy, m) {
+  for (const c of cands) {
+    if (Math.abs(c.x - fx) < m * 2 && Math.abs(c.y - fy) < m * 2) {
+      c.x = (c.x * c.n + fx) / (c.n + 1);
+      c.y = (c.y * c.n + fy) / (c.n + 1);
+      c.mod = (c.mod * c.n + m) / (c.n + 1);
+      c.n++;
+      return;
+    }
+  }
+  cands.push({ x: fx, y: fy, mod: m, n: 1 });
+}
+
+function findFinders(bin, w, h) {
+  const cands = [];
+  const step = Math.max(1, Math.floor(h / 240));
+  const tryAt = (xEnd, y, counts) => {
+    if (!checkRatio(counts)) return;
+    const cx = Math.round(xEnd - counts[4] - counts[3] - counts[2] / 2);
+    const mod = (counts[0] + counts[1] + counts[2] + counts[3] + counts[4]) / 7;
+    if (cx < 0 || cx >= w) return;
+    const vc = crossCheck(bin, w, h, cx, y, false, mod * 3);
+    if (!vc) return;
+    const cy = Math.round(vc.center);
+    if (cy < 0 || cy >= h) return;
+    const hc = crossCheck(bin, w, h, cx, cy, true, mod * 3);
+    if (!hc) return;
+    addCand(cands, hc.center, vc.center, (hc.total / 7 + vc.total / 7) / 2);
+  };
+  for (let y = 0; y < h; y += step) {
+    const counts = [0, 0, 0, 0, 0];
+    let idx = 0;
+    for (let x = 0; x < w; x++) {
+      if (bin[y * w + x]) {
+        if (idx % 2 === 1) idx++;
+        counts[idx]++;
+        continue;
+      }
+      if (idx % 2 === 1) {
+        counts[idx]++;
+        continue;
+      }
+      if (idx !== 4) {
+        idx++;
+        counts[idx]++;
+        continue;
+      }
+      tryAt(x, y, counts);
+      counts[0] = counts[2];
+      counts[1] = counts[3];
+      counts[2] = counts[4];
+      counts[3] = 1;
+      counts[4] = 0;
+      idx = 3;
+    }
+    if (idx === 4) tryAt(w, y, counts);
+  }
+  return cands;
+}
+
+// 3つの ファインダー の くみあわせを、ありそうな じゅんに ならべる
+function finderCandidates(list) {
+  const out = [];
+  for (let i = 0; i < list.length; i++)
+    for (let j = i + 1; j < list.length; j++)
+      for (let k = j + 1; k < list.length; k++) {
+        const t = [list[i], list[j], list[k]];
+        const mods = t.map((p) => p.mod);
+        const mAvg = (mods[0] + mods[1] + mods[2]) / 3;
+        if (Math.max(mods[0], mods[1], mods[2]) / Math.min(mods[0], mods[1], mods[2]) > 1.8) continue;
+        const d = [dist(t[1], t[2]), dist(t[0], t[2]), dist(t[0], t[1])];
+        let ci = 0;
+        if (d[1] > d[0] && d[1] > d[2]) ci = 1;
+        if (d[2] > d[0] && d[2] > d[1]) ci = 2;
+        const corner = t[ci];
+        const others = t.filter((_, idx) => idx !== ci);
+        const a1 = dist(corner, others[0]);
+        const b1 = dist(corner, others[1]);
+        if (Math.min(a1, b1) < mAvg * 10) continue; // ちいさすぎる = にせもの
+        if (Math.max(a1, b1) / Math.min(a1, b1) > 1.4) continue;
+        const hyp = dist(others[0], others[1]);
+        const expect = Math.sqrt(a1 * a1 + b1 * b1);
+        const err = Math.abs(hyp - expect) / expect;
+        if (err > 0.25) continue;
+        // ますめの かず が ただしい かたち(4k+17)に ちかいか
+        const est = (a1 / mAvg + b1 / mAvg) / 2 + 7;
+        const snapped = Math.round((est - 17) / 4) * 4 + 17;
+        if (snapped < 21 || snapped > 41) continue;
+        const fit = Math.abs(est - snapped) / 4;
+        const v1 = { x: others[0].x - corner.x, y: others[0].y - corner.y };
+        const v2 = { x: others[1].x - corner.x, y: others[1].y - corner.y };
+        const cross = v1.x * v2.y - v1.y * v2.x;
+        // がぞう ざひょうは y が した むき なので cross>0 が みぎうえ
+        const tr = cross > 0 ? others[0] : others[1];
+        const bl = cross > 0 ? others[1] : others[0];
+        const support = t.reduce((s2, p) => s2 + p.n, 0);
+        const score = err + Math.abs(a1 - b1) / Math.max(a1, b1) + fit * 1.5 - Math.min(support, 60) / 400;
+        out.push({ score, tl: corner, tr, bl, mod: mAvg, size: snapped });
+      }
+  out.sort((p, q) => p.score - q.score);
+  return out.slice(0, 8);
+}
+
+function dist(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+// ---------- しゃけい へんかん ----------
+function sq2quad(x0, y0, x1, y1, x2, y2, x3, y3) {
+  const dx3 = x0 - x1 + x2 - x3;
+  const dy3 = y0 - y1 + y2 - y3;
+  if (dx3 === 0 && dy3 === 0)
+    return [x1 - x0, x2 - x1, x0, y1 - y0, y2 - y1, y0, 0, 0, 1];
+  const dx1 = x1 - x2;
+  const dx2 = x3 - x2;
+  const dy1 = y1 - y2;
+  const dy2 = y3 - y2;
+  const den = dx1 * dy2 - dx2 * dy1;
+  const a13 = (dx3 * dy2 - dx2 * dy3) / den;
+  const a23 = (dx1 * dy3 - dx3 * dy1) / den;
+  return [
+    x1 - x0 + a13 * x1,
+    x3 - x0 + a23 * x3,
+    x0,
+    y1 - y0 + a13 * y1,
+    y3 - y0 + a23 * y3,
+    y0,
+    a13,
+    a23,
+    1,
+  ];
+}
+function quadInv(m) {
+  const [a11, a12, a13, a21, a22, a23, a31, a32, a33] = m;
+  return [
+    a22 * a33 - a23 * a32,
+    a13 * a32 - a12 * a33,
+    a12 * a23 - a13 * a22,
+    a23 * a31 - a21 * a33,
+    a11 * a33 - a13 * a31,
+    a13 * a21 - a11 * a23,
+    a21 * a32 - a22 * a31,
+    a12 * a31 - a11 * a32,
+    a11 * a22 - a12 * a21,
+  ];
+}
+function quadMul(a, b) {
+  const r = new Array(9);
+  for (let i = 0; i < 3; i++)
+    for (let j = 0; j < 3; j++) {
+      let s = 0;
+      for (let k = 0; k < 3; k++) s += a[i * 3 + k] * b[k * 3 + j];
+      r[i * 3 + j] = s;
+    }
+  return r;
+}
+function quad2quad(src, dst) {
+  // src(ますめ)->dst(がぞう)
+  const s = sq2quad(...src);
+  const d = sq2quad(...dst);
+  return quadMul(d, quadInv(s));
+}
+function applyT(t, x, y) {
+  const den = t[6] * x + t[7] * y + t[8];
+  return [(t[0] * x + t[1] * y + t[2]) / den, (t[3] * x + t[4] * y + t[5]) / den];
+}
+
+// そろえ マークを さがす
+function findAlign(bin, w, h, ex, ey, mod) {
+  const r = Math.max(4, Math.round(mod * 3));
+  let best = null;
+  for (let dy = -r; dy <= r; dy++)
+    for (let dx = -r; dx <= r; dx++) {
+      const x = Math.round(ex + dx);
+      const y = Math.round(ey + dy);
+      if (x < 1 || y < 1 || x >= w - 1 || y >= h - 1) continue;
+      if (!bin[y * w + x]) continue;
+      const hc = crossCheck3(bin, w, h, x, y, true, mod);
+      if (!hc) continue;
+      const vc = crossCheck3(bin, w, h, x, y, false, mod);
+      if (!vc) continue;
+      const d = Math.hypot(hc - ex, vc - ey);
+      if (!best || d < best.d) best = { x: hc, y: vc, d };
+    }
+  return best;
+}
+function crossCheck3(bin, w, h, cx, cy, horiz, mod) {
+  const get = (i) => (horiz ? bin[cy * w + i] : bin[i * w + cx]);
+  const lim = horiz ? w : h;
+  let c0 = 0;
+  let c1 = 0;
+  let c2 = 0;
+  let i = horiz ? cx : cy;
+  const start = i;
+  while (i >= 0 && get(i) && c1 < mod * 2) {
+    c1++;
+    i--;
+  }
+  if (i < 0) return null;
+  while (i >= 0 && !get(i) && c0 < mod * 2) {
+    c0++;
+    i--;
+  }
+  if (c0 === 0 || c0 >= mod * 2) return null;
+  i = start + 1;
+  while (i < lim && get(i) && c1 < mod * 3) {
+    c1++;
+    i++;
+  }
+  if (i >= lim) return null;
+  while (i < lim && !get(i) && c2 < mod * 2) {
+    c2++;
+    i++;
+  }
+  if (c2 === 0 || c2 >= mod * 2) return null;
+  if (Math.abs(c1 - mod) > mod * 0.7) return null;
+  return i - c2 - c1 / 2;
+}
+
+// ---------- ますめを よみとる ----------
+function sampleGrid(bin, w, h, t, size) {
+  const m = Array.from({ length: size }, () => new Array(size).fill(false));
+  let miss = 0;
+  for (let r = 0; r < size; r++)
+    for (let c = 0; c < size; c++) {
+      const [x, y] = applyT(t, c + 0.5, r + 0.5);
+      const xi = Math.round(x);
+      const yi = Math.round(y);
+      let dark = 0;
+      let tot = 0;
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = xi + dx;
+          const yy = yi + dy;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+          tot++;
+          if (bin[yy * w + xx]) dark++;
+        }
+      if (!tot) {
+        miss++;
+        m[r][c] = false;
+        continue;
+      }
+      m[r][c] = dark * 2 > tot;
+    }
+  if (miss > size * size * 0.02) return null;
+  return m;
+}
+
+// かたちじょうほう(レベル と マスク)
+const FMT_TABLE = [];
+(function () {
+  for (let d = 0; d < 32; d++) {
+    let v = d << 10;
+    for (let i = 4; i >= 0; i--) if (v >>> (i + 10)) v ^= 0x537 << i;
+    FMT_TABLE.push(((d << 10) | v) ^ 0x5412);
+  }
+})();
+function readFormat(m, size) {
+  let a = 0;
+  for (let i = 0; i < 15; i++) {
+    let bit;
+    if (i < 6) bit = m[i][8];
+    else if (i < 8) bit = m[i + 1][8];
+    else bit = m[size - 15 + i][8];
+    a |= (bit ? 1 : 0) << i;
+  }
+  let b = 0;
+  for (let i = 0; i < 15; i++) {
+    let bit;
+    if (i < 8) bit = m[8][size - i - 1];
+    else if (i < 9) bit = m[8][15 - i - 1 + 1];
+    else bit = m[8][15 - i - 1];
+    b |= (bit ? 1 : 0) << i;
+  }
+  for (const cand of [a, b]) {
+    let bestD = 99;
+    let bestI = -1;
+    for (let d = 0; d < 32; d++) {
+      const diff = popcount(FMT_TABLE[d] ^ cand);
+      if (diff < bestD) {
+        bestD = diff;
+        bestI = d;
+      }
+    }
+    if (bestD <= 3) return { ec: bestI >> 3, mask: bestI & 7 };
+  }
+  return null;
+}
+function popcount(x) {
+  let c = 0;
+  while (x) {
+    c += x & 1;
+    x >>>= 1;
+  }
+  return c;
+}
+
+const MASKS = [
+  (r, c) => (r + c) % 2 === 0,
+  (r) => r % 2 === 0,
+  (r, c) => c % 3 === 0,
+  (r, c) => (r + c) % 3 === 0,
+  (r, c) => (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0,
+  (r, c) => ((r * c) % 2) + ((r * c) % 3) === 0,
+  (r, c) => (((r * c) % 2) + ((r * c) % 3)) % 2 === 0,
+  (r, c) => (((r + c) % 2) + ((r * c) % 3)) % 2 === 0,
+];
+
+// どの ますが きのう パターン か
+function functionMask(ver) {
+  const size = ver * 4 + 17;
+  const f = Array.from({ length: size }, () => new Array(size).fill(false));
+  const block = (r0, c0, rr, cc) => {
+    for (let r = r0; r < r0 + rr; r++)
+      for (let c = c0; c < c0 + cc; c++) {
+        if (r < 0 || c < 0 || r >= size || c >= size) continue;
+        f[r][c] = true;
+      }
+  };
+  block(0, 0, 9, 9);
+  block(0, size - 8, 9, 8);
+  block(size - 8, 0, 8, 9);
+  const al = QR_ALIGN[ver];
+  for (let i = 0; i < al.length; i++)
+    for (let j = 0; j < al.length; j++) {
+      const r = al[i];
+      const c = al[j];
+      if (f[r][c]) continue;
+      block(r - 2, c - 2, 5, 5);
+    }
+  for (let i = 0; i < size; i++) {
+    f[6][i] = true;
+    f[i][6] = true;
+  }
+  f[size - 8][8] = true;
+  return f;
+}
+
+function qrDecodeMatrix(m) {
+  const size = m.length;
+  if ((size - 17) % 4 !== 0) return null;
+  const ver = (size - 17) / 4;
+  if (!QR_EC[ver]) return null;
+  const fmt = readFormat(m, size);
+  if (!fmt) return null;
+  if (fmt.ec !== 0) return null; // レベル M いがいは あつかわない(ec=0 が M)
+  const maskFn = MASKS[fmt.mask];
+  const fn = functionMask(ver);
+  const [, ecLen, g1, d1] = QR_EC[ver];
+  const nb = g1;
+  const bytes = [];
+  let cur = 0;
+  let nbit = 0;
+  let inc = -1;
+  let row = size - 1;
+  for (let col = size - 1; col > 0; col -= 2) {
+    if (col === 6) col--;
+    for (;;) {
+      for (let c = 0; c < 2; c++) {
+        const cc = col - c;
+        if (!fn[row][cc]) {
+          let bit = m[row][cc];
+          if (maskFn(row, cc)) bit = !bit;
+          cur = (cur << 1) | (bit ? 1 : 0);
+          nbit++;
+          if (nbit === 8) {
+            bytes.push(cur);
+            cur = 0;
+            nbit = 0;
+          }
+        }
+      }
+      row += inc;
+      if (row < 0 || row >= size) {
+        row -= inc;
+        inc = -inc;
+        break;
+      }
+    }
+  }
+  const total = QR_EC[ver][0];
+  if (bytes.length < total) return null;
+  const seq = bytes.slice(0, total);
+  // インターリーブを ほどく
+  const blocks = Array.from({ length: nb }, () => []);
+  let p = 0;
+  for (let i = 0; i < d1; i++) for (let b = 0; b < nb; b++) blocks[b].push(seq[p++]);
+  const ecs = Array.from({ length: nb }, () => []);
+  for (let i = 0; i < ecLen; i++) for (let b = 0; b < nb; b++) ecs[b].push(seq[p++]);
+  const data = [];
+  for (let b = 0; b < nb; b++) {
+    const fixed = rsCorrect(blocks[b].concat(ecs[b]), ecLen);
+    if (!fixed) return null;
+    fixed.forEach((v) => data.push(v));
+  }
+  // バイトモード を よむ
+  let bi = 0;
+  let bit = 0;
+  const take = (n) => {
+    let v = 0;
+    for (let i = 0; i < n; i++) {
+      if (bi >= data.length) return -1;
+      v = (v << 1) | ((data[bi] >>> (7 - bit)) & 1);
+      bit++;
+      if (bit === 8) {
+        bit = 0;
+        bi++;
+      }
+    }
+    return v;
+  };
+  const mode = take(4);
+  if (mode !== 4) return null;
+  const len = take(8);
+  if (len < 0 || len > data.length) return null;
+  const out = [];
+  for (let i = 0; i < len; i++) {
+    const v = take(8);
+    if (v < 0) return null;
+    out.push(v);
+  }
+  try {
+    return new TextDecoder().decode(new Uint8Array(out));
+  } catch (e) {
+    return null;
+  }
+}
+
+function qrDecodeFromGray(gray, w, h) {
+  const bin = binarize(gray, w, h);
+  const all = findFinders(bin, w, h);
+  if (all.length < 3) return null;
+  all.sort((a, b) => b.n - a.n);
+  const plansList = finderCandidates(all.slice(0, 9));
+  for (const p of plansList) {
+    const r = tryDecode(bin, w, h, p);
+    if (r != null) return r;
+  }
+  return null;
+}
+
+function tryDecode(bin, w, h, p) {
+  const { tl, tr, bl, mod } = p;
+  const brX = tr.x + bl.x - tl.x;
+  const brY = tr.y + bl.y - tl.y;
+  const sizes = [p.size];
+  if (p.size - 4 >= 21) sizes.push(p.size - 4);
+  if (p.size + 4 <= 41) sizes.push(p.size + 4);
+  for (const sz of sizes) {
+    const v = (sz - 17) / 4;
+    if (!QR_EC[v]) continue;
+    const alv = QR_ALIGN[v];
+    const plans = [];
+    const far = quad2quad(
+      [3.5, 3.5, sz - 3.5, 3.5, sz - 3.5, sz - 3.5, 3.5, sz - 3.5],
+      [tl.x, tl.y, tr.x, tr.y, brX, brY, bl.x, bl.y]
+    );
+    if (alv.length) {
+      const acv = alv[alv.length - 1];
+      const [ex, ey] = applyT(far, acv + 0.5, acv + 0.5);
+      const found = findAlign(bin, w, h, ex, ey, mod);
+      if (found)
+        plans.push(
+          quad2quad(
+            [3.5, 3.5, sz - 3.5, 3.5, acv + 0.5, acv + 0.5, 3.5, sz - 3.5],
+            [tl.x, tl.y, tr.x, tr.y, found.x, found.y, bl.x, bl.y]
+          )
+        );
+    }
+    plans.push(far);
+    for (const tt of plans) {
+      const m = sampleGrid(bin, w, h, tt, sz);
+      if (!m) continue;
+      const r = qrDecodeMatrix(m);
+      if (r != null) return r;
+    }
+  }
+  return null;
+}
+
+// ---------- けいけんち ----------// ---------- けいけんち ----------
 const EXP_PER_CORRECT = 1;   // せいかい 1もん
 const EXP_PER_STAGE = 3;     // ふつうの ステージ クリア
 const EXP_PER_BOSS = 20;     // ボス げきは
@@ -478,6 +1701,18 @@ const ACHIEVEMENTS = [
     check: (r) => Object.values(r.kukuFast || {}).reduce((a, b) => a + b, 0) >= 300 },
   { id: "kuku500", emoji: "📕", name: "九九 500もん", desc: "九九で つうさん 500もん せいかい",
     check: (r) => Object.values(r.tableCorrect || {}).reduce((a, b) => a + b, 0) >= 500 },
+  // ---- たいせん ----
+  { id: "vs1", emoji: "⚔️", name: "はじめての たいせん", desc: "たいせんを 1かい する",
+    check: (r) => (r.vsPlay || 0) >= 1 },
+  { id: "vsWin1", emoji: "🥇", name: "はじめての しょうり", desc: "たいせんで 1かい かつ",
+    check: (r) => (r.vsWin || 0) >= 1 },
+  { id: "vsWin10", emoji: "🏆", name: "たいせん 10しょう", desc: "たいせんで 10かい かつ",
+    check: (r) => (r.vsWin || 0) >= 10 },
+  { id: "vs30", emoji: "🤝", name: "たいせん 30かい", desc: "たいせんを 30かい する",
+    check: (r) => (r.vsPlay || 0) >= 30 },
+  { id: "vsStrong", emoji: "💪", name: "つよさ 500", desc: "そうごうりょくが 500を こえる",
+    check: (r) => (r.bestPower || 0) >= 500 },
+
   // ---- チャレンジ ----
   { id: "ta20", emoji: "⏱️", name: "タイムアタック 20もん", desc: "60びょうで 20もん せいかい",
     check: (r) => (r.bestTimeAttack || 0) >= 20 },
@@ -2616,6 +3851,304 @@ function MonsterFace({ stage, size, style, artStyle = "deformed", skin = null })
   return <span style={{ fontSize: size, ...style }}>{stage?.emoji}</span>;
 }
 
+// QRを がめんに えがく
+function QrView({ text, size = 212 }) {
+  const m = React.useMemo(() => {
+    try {
+      return makeQr(text);
+    } catch (e) {
+      return null;
+    }
+  }, [text]);
+  if (!m) return null;
+  const n = m.length;
+  const quiet = 4;
+  const total = n + quiet * 2;
+  const cells = [];
+  for (let r = 0; r < n; r++)
+    for (let c = 0; c < n; c++)
+      if (m[r][c]) cells.push(<rect key={r + "_" + c} x={c + quiet} y={r + quiet} width="1" height="1" />);
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${total} ${total}`}
+      shapeRendering="crispEdges"
+      style={{ display: "block", borderRadius: 8 }}
+    >
+      <rect x="0" y="0" width={total} height={total} fill="#FFFFFF" />
+      <g fill="#111111">{cells}</g>
+    </svg>
+  );
+}
+
+// ---------- しあいの かんせん がめん ----------
+// カメラで QRを よみとる
+function QrScanner({ onFound, onClose }) {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const stopRef = useRef(false);
+  const [err, setErr] = useState("");
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let stream = null;
+    let timer = null;
+    stopRef.current = false;
+
+    const scan = () => {
+      if (stopRef.current) return;
+      const v = videoRef.current;
+      const cv = canvasRef.current;
+      if (!v || !cv || !v.videoWidth) return;
+      const sc = Math.min(1, 480 / v.videoWidth);
+      const w = Math.max(80, Math.round(v.videoWidth * sc));
+      const h = Math.max(80, Math.round(v.videoHeight * sc));
+      if (cv.width !== w) cv.width = w;
+      if (cv.height !== h) cv.height = h;
+      let data;
+      try {
+        const ctx = cv.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(v, 0, 0, w, h);
+        data = ctx.getImageData(0, 0, w, h).data;
+      } catch (e) {
+        return;
+      }
+      const gray = new Uint8Array(w * h);
+      for (let i = 0, p = 0; i < gray.length; i++, p += 4)
+        gray[i] = (data[p] * 77 + data[p + 1] * 150 + data[p + 2] * 29) >> 8;
+      let text = null;
+      try {
+        text = qrDecodeFromGray(gray, w, h);
+      } catch (e) {
+        text = null;
+      }
+      if (text) {
+        stopRef.current = true;
+        if (timer) clearInterval(timer);
+        onFound(text);
+      }
+    };
+
+    const start = async () => {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setErr("この ブラウザでは カメラを つかえないみたい。いつもの カメラアプリで QRを よみとってね");
+        return;
+      }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+      } catch (e) {
+        const n = (e && e.name) || "";
+        if (n === "NotAllowedError" || n === "SecurityError")
+          setErr("カメラを つかう きょかが ないみたい。ブラウザの せっていで カメラを ゆるしてね");
+        else if (n === "NotFoundError" || n === "OverconstrainedError")
+          setErr("カメラが みつからなかったよ");
+        else setErr("カメラを ひらけなかったよ(" + (n || "げんいん ふめい") + ")");
+        return;
+      }
+      if (stopRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      const v = videoRef.current;
+      if (!v) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      v.srcObject = stream;
+      try {
+        await v.play();
+      } catch (e) {
+        /* iOS では ユーザー そうさの あとなら ならない */
+      }
+      setReady(true);
+      timer = setInterval(scan, 120);
+    };
+
+    start();
+    return () => {
+      stopRef.current = true;
+      if (timer) clearInterval(timer);
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  return (
+    <div style={styles.scanWrap}>
+      <div style={styles.scanHead}>
+        <span>あいての QRに むけてね</span>
+        <button onClick={onClose} style={styles.scanClose}>
+          とじる
+        </button>
+      </div>
+      <div style={styles.scanBox}>
+        <video ref={videoRef} playsInline muted autoPlay style={styles.scanVideo} />
+        <div style={styles.scanGuide} />
+        {!ready && !err && <div style={styles.scanLoading}>カメラを じゅんびちゅう…</div>}
+      </div>
+      <canvas ref={canvasRef} style={{ display: "none" }} />
+      {err ? (
+        <div style={styles.scanErr}>{err}</div>
+      ) : (
+        <div style={styles.scanHint}>
+          わくの なかに QRぜんたいが はいるように、20〜30cm くらい はなして もってね
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VsBattleView({ battle, step, artStyle, skinMonster, onSkip, onClose }) {
+  const { result, me, opp, myName, oppName } = battle;
+  const log = result.log;
+  const cur = log[Math.min(step, log.length - 1)];
+  const done = step >= log.length - 1;
+
+  // いまの HP(ログに のこしてある)
+  let hpA = result.a.hp;
+  let hpB = result.b.hp;
+  for (let i = 0; i <= Math.min(step, log.length - 1); i++) {
+    if (typeof log[i].hpA === "number") {
+      hpA = log[i].hpA;
+      hpB = log[i].hpB;
+    }
+  }
+  const maxA = result.a.hp;
+  const maxB = result.b.hp;
+
+  const nameA = myName || "じぶん";
+  const nameB = oppName || opp.player || "あいて";
+
+  // いま なにが おきたか の せつめい
+  function caption(c) {
+    if (!c) return "";
+    const who = c.by === 0 ? nameA : nameB;
+    if (c.type === "start") return `${c.first === 0 ? nameA : nameB} の せんこう!`;
+    if (c.type === "miss") return `${who} の こうげき… かわされた!`;
+    if (c.type === "attack") {
+      const parts = [];
+      if (c.skill) parts.push(`${c.skill.emoji} ${c.skill.name}!`);
+      if (c.pinch) parts.push("ねばりの いちげき!");
+      if (c.crit) parts.push("かいしんの いちげき!");
+      return `${who} の こうげき! ${parts.join(" ")} ${c.dmg} ダメージ`;
+    }
+    if (c.type === "heal") return `${who} は ${c.amount} かいふくした!`;
+    if (c.type === "win") return `${who} の かち!`;
+    if (c.type === "timeup")
+      return c.winner === -1 ? "ひきわけ!" : `${c.winner === 0 ? nameA : nameB} の はんていがち!`;
+    return "";
+  }
+
+  const attackSide =
+    cur && (cur.type === "attack" || cur.type === "miss") ? cur.by : null;
+  const hurtSide = cur && cur.type === "attack" ? 1 - cur.by : null;
+
+  const row = (name, mon, hp, max, side, boost) => (
+    <div style={styles.vsFighterBox}>
+      <div style={styles.vsFighterName}>
+        {name}
+        {boost > 1.01 && <span style={styles.vsBoostTag}>ブースト ×{boost.toFixed(1)}</span>}
+      </div>
+      <div style={styles.vsFighterMon}>{mon}</div>
+      <div style={styles.vsHpTrack}>
+        <div
+          style={{
+            ...styles.vsHpFill,
+            width: `${Math.max(0, (hp / max) * 100)}%`,
+            background: hp / max > 0.3 ? "#7ED957" : "#FF6B4A",
+          }}
+        />
+      </div>
+      <div style={styles.vsHpNum}>
+        {hp} / {max}
+      </div>
+    </div>
+  );
+
+  const face = (st, isMe) => (
+    <span
+      className={
+        attackSide === (isMe ? 0 : 1)
+          ? isMe
+            ? "atk-left"
+            : "atk-right"
+          : hurtSide === (isMe ? 0 : 1)
+          ? isMe
+            ? "hurt-left"
+            : "hurt-right"
+          : "idle-bob"
+      }
+      style={{ display: "inline-flex", position: "relative" }}
+    >
+      <MonsterFace
+        stage={{ id: st.stageId, ...STAGE_DEFS[st.stageId] }}
+        size={72}
+        artStyle={artStyle}
+        skin={isMe ? skinMonster : null}
+      />
+      {st.hat && (
+        <span style={styles.hatOnFighter}>
+          {GACHA_ITEMS.find((g) => g.id === st.hat)?.emoji}
+        </span>
+      )}
+    </span>
+  );
+
+  const winner = result.winner;
+
+  return (
+    <div style={styles.dashOverlay}>
+      <div style={styles.dashHeader}>
+        <span style={styles.dashTitle}>⚔️ しあい</span>
+        {done ? (
+          <button onClick={onClose} style={styles.drawClose}>
+            ✕ とじる
+          </button>
+        ) : (
+          <button onClick={onSkip} style={styles.drawClose}>
+            ⏩ さいごまで
+          </button>
+        )}
+      </div>
+
+      <div style={styles.vsArena}>
+        <div style={styles.vsTopRow}>
+          {row(nameA, face(result.a, true), hpA, maxA, 0, result.a.boost || 1)}
+          <div style={styles.vsMiddle}>VS</div>
+          {row(nameB, face(result.b, false), hpB, maxB, 1, result.b.boost || 1)}
+        </div>
+
+        <div style={styles.vsCaption}>{caption(cur)}</div>
+
+        {done && (
+          <div style={styles.vsResultBox}>
+            <div style={styles.vsResultTitle}>
+              {winner === 0 ? "🏆 かち!" : winner === 1 ? "くやしい… まけ" : "ひきわけ"}
+            </div>
+            <div style={styles.vsResultSub}>
+              {winner === 0
+                ? "けいさんの せいかが でたね!"
+                : winner === 1
+                ? "もっと けいさんして つよくなろう!"
+                : "いい しょうぶだった!"}
+            </div>
+            <button onClick={onClose} style={styles.evoBtn}>
+              もどる
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ---------- エラーが おきても まっくらに しない ----------
 // こまったときに なにが おきたか がめんに だす(スクショで しらべられるように)
 class ErrorCatcher extends React.Component {
@@ -2754,6 +4287,9 @@ function MathMonsterBattle() {
     bestSurvival: 0,     // サバイバルの さいこう れんぞく
     morningPlay: false,  // あさ(5〜9じ)に あそんだ
     morningDays: 0,      // あさに あそんだ 日すう
+    vsWin: 0,            // たいせんの かちかず
+    vsPlay: 0,           // たいせんした かいすう
+    bestPower: 0,        // これまでの さいこう そうごうりょく
     subjectsToday: [],   // きょう あそんだ きょうか
     allSubjectsDay: false, // 1日で 3きょうか ぜんぶ
     gradeCorrect: {},
@@ -2789,6 +4325,17 @@ function MathMonsterBattle() {
   const [typed, setTyped] = useState("");
   // チャレンジ('timeattack' | 'survival')
   const [challenge, setChallenge] = useState(null);
+  // つうしん たいせん
+  const [vsOpen, setVsOpen] = useState(false);
+  const [vsInput, setVsInput] = useState("");
+  const [scanOpen, setScanOpen] = useState(false);
+  const [vsMsg, setVsMsg] = useState("");
+  const [vsBoost, setVsBoost] = useState(true);
+  const [vsBattle, setVsBattle] = useState(null); // {result, me, opp, step}
+  const [vsStep, setVsStep] = useState(0);
+  const [vsRecord, setVsRecord] = useState({ win: 0, lose: 0 });
+  const [vsPending, setVsPending] = useState(null);
+  const [vsShowQr, setVsShowQr] = useState(true);
   const [chScore, setChScore] = useState(0);
   const [chLeft, setChLeft] = useState(TIME_ATTACK_SEC);
   const [chResult, setChResult] = useState(null);
@@ -3131,6 +4678,9 @@ function MathMonsterBattle() {
       bestSurvival: 0,
       morningPlay: false,
       morningDays: 0,
+      vsWin: 0,
+      vsPlay: 0,
+      bestPower: 0,
       subjectsToday: [],
       allSubjectsDay: false,
       gradeCorrect: {},
@@ -3750,6 +5300,82 @@ function MathMonsterBattle() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [challenge, screen]);
 
+  // しあいを 1ステップずつ すすめる(かんせん)
+  useEffect(() => {
+    if (!vsBattle) return;
+    const total = vsBattle.result.log.length;
+    if (vsStep >= total - 1) {
+      // しあいが おわった ところで せいせきを つける
+      if (vsStep === total - 1) {
+        const w = vsBattle.result.winner;
+        setVsRecord((r) =>
+          w === 0 ? { ...r, win: r.win + 1 } : w === 1 ? { ...r, lose: r.lose + 1 } : r
+        );
+        if (!vsBattle.self) {
+          setRecords((r) => ({
+            ...r,
+            vsPlay: (r.vsPlay || 0) + 1,
+            vsWin: (r.vsWin || 0) + (w === 0 ? 1 : 0),
+          }));
+        }
+      }
+      return;
+    }
+    const cur = vsBattle.result.log[vsStep];
+    const wait = cur && cur.type === "start" ? 900 : 850;
+    const t = setTimeout(() => setVsStep((n) => n + 1), wait);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vsBattle, vsStep]);
+
+  // QRから ひらかれた とき(URLに ?vs= が ある)
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      const sp = new URLSearchParams(location.search);
+      const code = sp.get("vs");
+      if (!code) return;
+      // URLを きれいに して、リロードしても くりかえさないように する
+      history.replaceState(null, "", location.pathname);
+      const opp = decodeCard(code);
+      if (!opp) {
+        setVsOpen(true);
+        setVsMsg("QRの ないようが よめなかったみたい");
+        return;
+      }
+      setVsOpen(true);
+      setVsInput(code);
+      setVsMsg("");
+      setVsPending(code);
+    } catch (e) {
+      // URLが よめなくても ふつうに あそべる
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
+  // うけとった コードで しあいを はじめる(ステータスが そろってから)
+  useEffect(() => {
+    if (!vsPending || !loaded) return;
+    const code = vsPending;
+    setVsPending(null);
+    startVs(code);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vsPending, loaded]);
+
+  // そうごうりょくの さいこうきろくを のこす
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      const pw = battlePower(
+        battleStats({ records, owned, branch, exp, rebirth, correctCount, artStyle })
+      );
+      setRecords((r) => (pw > (r.bestPower || 0) ? { ...r, bestPower: pw } : r));
+    } catch (e) {
+      // けいさんできなくても あそびには えいきょう しない
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, exp, correctCount, branch, rebirth, owned.length]);
+
   // アイテムの おしらせを じどうで けす
   useEffect(() => {
     if (!itemToast) return;
@@ -4039,6 +5665,127 @@ function MathMonsterBattle() {
   }
 
   const activeProfile = profiles.find((p) => p.id === activeId) || profiles[0];
+
+  // ---------- つうしん たいせん ----------
+  // いまの セーブと おなじ かたちを つくる(ステータス けいさんに つかう)
+  function currentSave() {
+    return {
+      records,
+      owned,
+      branch,
+      exp,
+      rebirth,
+      correctCount,
+      artStyle,
+      myMonsters,
+      skinId,
+      equipped,
+    };
+  }
+
+  // じぶんの たいせんステータス(なにか あっても がめんが とまらないように)
+  let myCardStats;
+  let myCode = "";
+  try {
+    myCardStats = battleStats(currentSave());
+    myCode = encodeCard(myCardStats, activeProfile.name);
+  } catch (e) {
+    myCardStats = {
+      name: stage.name,
+      stageId: stage.id,
+      branch,
+      artStyle,
+      skin: null,
+      hat: null,
+      rebirth,
+      hp: maxHp,
+      atk: 5,
+      def: 0,
+      spd: 5,
+      crit: 0.05,
+    };
+  }
+
+  // QRに する URL(いまの ページの アドレス + じぶんの コード)
+  const myVsUrl = (() => {
+    try {
+      const base = location.origin + location.pathname;
+      return base + "?vs=" + myCode;
+    } catch (e) {
+      return myCode;
+    }
+  })();
+
+  async function copyMyUrl() {
+    try {
+      await navigator.clipboard.writeText(myVsUrl);
+      setItemToast("📋 リンクを コピーしたよ");
+    } catch (e) {
+      setVsMsg("コピーできなかったので、ながおしして コピーしてね");
+    }
+  }
+
+  async function copyMyCode() {
+    try {
+      await navigator.clipboard.writeText(myCode);
+      setItemToast("📋 コードを コピーしたよ");
+    } catch (e) {
+      setVsMsg("コピーできなかったので、ながおしして コピーしてね");
+    }
+  }
+
+  // あいての コードを よみこんで しあいを はじめる
+  function startVs(input) {
+    // リンクごと はられても だいじょうぶなように する
+    let code = String(input || "").trim();
+    const m = code.match(/[?&]vs=([^&\s]+)/);
+    if (m) code = m[1];
+    const opp = decodeCard(code);
+    if (!opp) {
+      setVsMsg("コードが ただしくないみたい。もういちど かくにんしてね");
+      return;
+    }
+    const result = runMatch(myCardStats, myCode, opp, String(code).trim(), vsBoost);
+    setVsBattle({ result, me: myCardStats, opp, myName: activeProfile.name });
+    setVsStep(0);
+    setVsMsg("");
+  }
+
+  // じぶんの きろくと たたかう(れんしゅう)
+  function startVsSelf() {
+    const opp = { ...myCardStats, name: myCardStats.name };
+    const result = simulateBattle(myCardStats, opp, seedFrom(myCode + "|self" + Date.now()), vsBoost);
+    setVsBattle({ result, me: myCardStats, opp, myName: activeProfile.name, oppName: "もう ひとりの じぶん", self: true });
+    setVsStep(0);
+    setVsMsg("");
+  }
+
+  // ほかの プロフィールと たたかう(おなじ たんまつの きょうだい)
+  function startVsProfile(pid) {
+    try {
+      const raw = localStorage.getItem(saveKeyFor(pid));
+      if (!raw) {
+        setVsMsg("その人の きろくが まだ ないよ");
+        return;
+      }
+      const data = JSON.parse(raw);
+      const opp = battleStats(data);
+      const prof = profiles.find((x) => x.id === pid);
+      const oppCode = encodeCard(opp, prof ? prof.name : "あいて");
+      const result = runMatch(myCardStats, myCode, opp, oppCode, vsBoost);
+      setVsBattle({
+        result,
+        me: myCardStats,
+        opp,
+        myName: activeProfile.name,
+        oppName: prof ? prof.name : "あいて",
+      });
+      setVsStep(0);
+      setVsMsg("");
+    } catch (e) {
+      setVsMsg("きろくを よみこめなかったよ");
+    }
+  }
 
   // ---------- セーブデータの ほぞんと ふくげん ----------
   // いまの データを まとめて ファイルに おとす
@@ -4442,6 +6189,190 @@ function MathMonsterBattle() {
             </span>
           ))}
         </div>
+
+        {/* つうしん たいせん */}
+        {vsOpen && !vsBattle && (
+          <div style={styles.dashOverlay}>
+            <div style={styles.dashHeader}>
+              <span style={styles.dashTitle}>⚔️ たいせん</span>
+              <button onClick={() => { setVsOpen(false); setVsMsg(""); }} style={styles.drawClose}>
+                ✕ とじる
+              </button>
+            </div>
+            <div style={styles.dashBody}>
+              {/* じぶんの カード */}
+              <div style={styles.vsCard}>
+                <div style={styles.vsCardTop}>
+                  <span style={{ position: "relative", display: "inline-flex" }}>
+                    <MonsterFace
+                      stage={{ id: myCardStats.stageId, ...STAGE_DEFS[myCardStats.stageId] }}
+                      size={58}
+                      artStyle={artStyle}
+                      skin={skinMonster}
+                    />
+                    {equipped.hat && (
+                      <span style={styles.hatOnFighter}>
+                        {GACHA_ITEMS.find((g) => g.id === equipped.hat)?.emoji}
+                      </span>
+                    )}
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <div style={styles.vsCardName}>
+                      {myCardStats.name}
+                      {myCardStats.rebirth > 0 && (
+                        <span style={styles.vsRebirth}>てんせい {myCardStats.rebirth}</span>
+                      )}
+                    </div>
+                    <div style={styles.vsCardOwner}>{activeProfile.name}</div>
+                    <div style={styles.vsPower}>そうごうりょく {battlePower(myCardStats)}</div>
+                  </div>
+                </div>
+                <div style={styles.vsStatGrid}>
+                  {[
+                    ["HP", myCardStats.hp, "❤️"],
+                    ["こうげき", myCardStats.atk, "⚔️"],
+                    ["まもり", myCardStats.def, "🛡️"],
+                    ["すばやさ", myCardStats.spd, "💨"],
+                    ["かいしん", `${Math.round(myCardStats.crit * 100)}%`, "✨"],
+                    ["わざ", skillFor(myCardStats.branch).name, skillFor(myCardStats.branch).emoji],
+                  ].map(([k, v, e]) => (
+                    <div key={k} style={styles.vsStatCell}>
+                      <div style={styles.vsStatLabel}>
+                        {e} {k}
+                      </div>
+                      <div style={styles.vsStatValue}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={styles.vsNote}>
+                  けいさんを がんばるほど つよくなるよ(せいかいすう・はやさ・ノーミス・会心)
+                </div>
+              </div>
+
+              {/* QRで わたす */}
+              <div style={styles.dashSection}>あいてに みせる QR</div>
+              {vsShowQr ? (
+                <>
+                  <div style={styles.qrWrap}>
+                    <QrView text={myVsUrl} size={212} />
+                  </div>
+                  <div style={styles.dashNote}>
+                    あいての カメラアプリで この QRを よみこむと、たいせん画面が ひらくよ。
+                    <br />
+                    (おなじ URLを ホーム画面に いれている人どうしで つかえます)
+                  </div>
+                </>
+              ) : (
+                <div style={styles.vsCodeBox}>{myCode}</div>
+              )}
+              <div style={styles.backupBox}>
+                <button onClick={() => setVsShowQr((v) => !v)} style={styles.backupBtnOutline}>
+                  {vsShowQr ? "🔢 もじの コード" : "📷 QRを みせる"}
+                </button>
+                <button onClick={vsShowQr ? copyMyUrl : copyMyCode} style={styles.backupBtn}>
+                  📋 {vsShowQr ? "リンクを コピー" : "コードを コピー"}
+                </button>
+              </div>
+
+              {/* あいての コード */}
+              <div style={styles.dashSection}>あいての コードを いれる</div>
+              <button onClick={() => { setVsMsg(""); setScanOpen(true); }} style={styles.scanOpenBtn}>
+                📷 カメラで QRを よみとる
+              </button>
+              <div style={styles.dashNote}>
+                カメラが つかえないときは、もらった コードや リンクを ここに はりつけてね
+              </div>
+              <textarea
+                value={vsInput}
+                onChange={(e) => setVsInput(e.target.value)}
+                placeholder="もらった コードを ここに はりつけ"
+                style={styles.vsInput}
+              />
+              <button
+                onClick={() => startVs(vsInput)}
+                disabled={!vsInput.trim()}
+                style={{ ...styles.vsStartBtn, opacity: vsInput.trim() ? 1 : 0.5 }}
+              >
+                ⚔️ たたかう!
+              </button>
+              {vsMsg && <div style={styles.vsErr}>{vsMsg}</div>}
+              {scanOpen && (
+                <QrScanner
+                  onClose={() => setScanOpen(false)}
+                  onFound={(text) => {
+                    setScanOpen(false);
+                    setVsInput(text);
+                    startVs(text);
+                  }}
+                />
+              )}
+
+              {/* おなじ たんまつの ほかの人 */}
+              {profiles.filter((x) => x.id !== activeId).length > 0 && (
+                <>
+                  <div style={styles.dashSection}>おなじ タブレットの 人と</div>
+                  <div style={styles.vsProfileRow}>
+                    {profiles
+                      .filter((x) => x.id !== activeId)
+                      .map((pr) => (
+                        <button key={pr.id} onClick={() => startVsProfile(pr.id)} style={styles.vsProfileBtn}>
+                          <span style={{ fontSize: 20 }}>{pr.icon}</span>
+                          <span style={styles.vsProfileName}>{pr.name}</span>
+                        </button>
+                      ))}
+                  </div>
+                </>
+              )}
+
+              <div style={styles.dashSection}>れんしゅう</div>
+              <button onClick={startVsSelf} style={styles.vsSelfBtn}>
+                🪞 もう ひとりの じぶんと たたかう
+              </button>
+
+              {/* せってい */}
+              <div style={styles.dashSection}>ルール</div>
+              <div style={styles.vsRuleRow}>
+                {[
+                  { on: true, label: "がんばりブースト あり", desc: "つよさの さを すこし うめる" },
+                  { on: false, label: "ガチンコ", desc: "そのままの つよさで たたかう" },
+                ].map((r) => (
+                  <button
+                    key={String(r.on)}
+                    onClick={() => setVsBoost(r.on)}
+                    style={{
+                      ...styles.vsRuleBtn,
+                      ...(vsBoost === r.on ? styles.difficultyBtnActive : {}),
+                    }}
+                  >
+                    <div style={{ fontSize: 12, fontWeight: 700 }}>{r.label}</div>
+                    <div style={{ fontSize: 10, color: "#8A85B8" }}>{r.desc}</div>
+                  </button>
+                ))}
+              </div>
+              <div style={styles.dashNote}>
+                ブーストを つけると、つよさの さが おおきくても 3かいに 1かいくらいは かてるよ。
+                それでも やりこんだ ほうが ゆうり。
+                <br />
+                せいせき: {vsRecord.win}しょう {vsRecord.lose}はい
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* しあいの かんせん */}
+        {vsBattle && (
+          <VsBattleView
+            battle={vsBattle}
+            step={vsStep}
+            artStyle={artStyle}
+            skinMonster={skinMonster}
+            onSkip={() => setVsStep(vsBattle.result.log.length - 1)}
+            onClose={() => {
+              setVsBattle(null);
+              setVsStep(0);
+            }}
+          />
+        )}
 
         {profileOpen && (
           <div style={styles.evoOverlay}>
@@ -5138,6 +7069,15 @@ function MathMonsterBattle() {
               <span style={{ fontSize: 17 }}>💀</span>
               <span style={styles.chBtnLabel}>サバイバル</span>
               <span style={styles.chBest}>さいこう {records.bestSurvival || 0}もん</span>
+            </button>
+          </div>
+
+          {/* つうしん たいせん */}
+          <div style={styles.challengeRow}>
+            <button onClick={() => setVsOpen(true)} style={{ ...styles.chBtn, flex: 1 }}>
+              <span style={{ fontSize: 17 }}>⚔️</span>
+              <span style={styles.chBtnLabel}>たいせん</span>
+              <span style={styles.chBest}>そうごうりょく {battlePower(myCardStats)}</span>
             </button>
           </div>
 
@@ -7210,6 +9150,354 @@ const styles = {
     padding: "1px 6px",
     fontSize: 9,
     fontWeight: 800,
+  },
+  vsCard: {
+    background: "#22204A",
+    border: "2px solid #4A4580",
+    borderRadius: 16,
+    padding: 12,
+  },
+  vsCardTop: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+  },
+  vsCardName: {
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 16,
+    color: "#F5F3FF",
+  },
+  vsRebirth: {
+    marginLeft: 6,
+    fontSize: 9,
+    fontWeight: 800,
+    color: "#3A2400",
+    background: "#FFD23F",
+    borderRadius: 8,
+    padding: "1px 6px",
+  },
+  vsCardOwner: {
+    fontSize: 11,
+    color: "#8A85B8",
+  },
+  vsPower: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#FFD23F",
+    marginTop: 2,
+  },
+  vsStatGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr 1fr",
+    gap: 6,
+    marginTop: 10,
+  },
+  vsStatCell: {
+    background: "#1E1C42",
+    borderRadius: 10,
+    padding: "6px 4px",
+    textAlign: "center",
+  },
+  vsStatLabel: {
+    fontSize: 9.5,
+    color: "#8A85B8",
+  },
+  vsStatValue: {
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 15,
+    color: "#F5F3FF",
+  },
+  vsNote: {
+    fontSize: 10,
+    color: "#6F6A9C",
+    marginTop: 8,
+    textAlign: "center",
+  },
+  qrWrap: {
+    display: "flex",
+    justifyContent: "center",
+    background: "#FFFFFF",
+    borderRadius: 12,
+    padding: 10,
+  },
+  vsCodeBox: {
+    background: "#1E1C42",
+    border: "1px solid #4A4580",
+    borderRadius: 10,
+    padding: 8,
+    fontSize: 9,
+    color: "#B8B3E0",
+    wordBreak: "break-all",
+    maxHeight: 70,
+    overflowY: "auto",
+    WebkitUserSelect: "text",
+    userSelect: "text",
+  },
+  scanOpenBtn: {
+    width: "100%",
+    padding: "14px 10px",
+    fontSize: 17,
+    fontWeight: 800,
+    color: "#fff",
+    background: "linear-gradient(180deg,#38bdf8,#0284c7)",
+    border: "none",
+    borderRadius: 14,
+    cursor: "pointer",
+    marginBottom: 10,
+  },
+  scanWrap: {
+    position: "fixed",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 120,
+    background: "rgba(8,12,24,0.96)",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "calc(env(safe-area-inset-top) + 12px) 14px calc(env(safe-area-inset-bottom) + 14px)",
+    gap: 12,
+  },
+  scanHead: {
+    width: "100%",
+    maxWidth: 420,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    color: "#e2e8f0",
+    fontSize: 16,
+    fontWeight: 800,
+  },
+  scanClose: {
+    padding: "8px 14px",
+    fontSize: 15,
+    fontWeight: 800,
+    color: "#0f172a",
+    background: "#e2e8f0",
+    border: "none",
+    borderRadius: 12,
+    cursor: "pointer",
+  },
+  scanBox: {
+    position: "relative",
+    width: "100%",
+    maxWidth: 420,
+    aspectRatio: "1 / 1",
+    borderRadius: 18,
+    overflow: "hidden",
+    background: "#000",
+  },
+  scanVideo: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    display: "block",
+  },
+  scanGuide: {
+    position: "absolute",
+    left: "10%",
+    top: "10%",
+    width: "80%",
+    height: "80%",
+    border: "3px solid rgba(255,255,255,0.85)",
+    borderRadius: 14,
+    boxShadow: "0 0 0 9999px rgba(0,0,0,0.25)",
+    pointerEvents: "none",
+  },
+  scanLoading: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: "46%",
+    textAlign: "center",
+    color: "#e2e8f0",
+    fontSize: 15,
+    fontWeight: 700,
+  },
+  scanHint: {
+    width: "100%",
+    maxWidth: 420,
+    color: "#aebbd0",
+    fontSize: 13,
+    lineHeight: 1.6,
+    textAlign: "center",
+  },
+  scanErr: {
+    width: "100%",
+    maxWidth: 420,
+    color: "#fecaca",
+    background: "rgba(127,29,29,0.5)",
+    border: "1px solid #b91c1c",
+    borderRadius: 12,
+    padding: "10px 12px",
+    fontSize: 14,
+    lineHeight: 1.6,
+    textAlign: "center",
+  },
+  vsInput: {
+    width: "100%",
+    minHeight: 64,
+    background: "#1E1C42",
+    border: "1px solid #4A4580",
+    borderRadius: 10,
+    padding: 8,
+    color: "#F5F3FF",
+    fontSize: 11,
+    boxSizing: "border-box",
+    WebkitUserSelect: "text",
+    userSelect: "text",
+  },
+  vsStartBtn: {
+    width: "100%",
+    marginTop: 8,
+    background: "linear-gradient(180deg, #FF7B5A 0%, #E8503A 100%)",
+    border: "none",
+    borderRadius: 14,
+    padding: "12px 0",
+    color: "#FFF4F0",
+    fontWeight: 800,
+    fontSize: 15,
+    cursor: "pointer",
+  },
+  vsErr: {
+    fontSize: 11,
+    color: "#FFB199",
+    marginTop: 6,
+  },
+  vsProfileRow: {
+    display: "flex",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  vsProfileBtn: {
+    background: "#22204A",
+    border: "1px solid #4A4580",
+    borderRadius: 12,
+    padding: "8px 14px",
+    color: "#F5F3FF",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  },
+  vsProfileName: {
+    fontSize: 12,
+    fontWeight: 700,
+  },
+  vsSelfBtn: {
+    width: "100%",
+    background: "#22204A",
+    border: "1px solid #4A4580",
+    borderRadius: 12,
+    padding: "10px 0",
+    color: "#B8B3E0",
+    fontSize: 12,
+    cursor: "pointer",
+  },
+  vsRuleRow: {
+    display: "flex",
+    gap: 8,
+  },
+  vsRuleBtn: {
+    flex: 1,
+    background: "#22204A",
+    border: "2px solid #362F66",
+    borderRadius: 12,
+    padding: "8px 6px",
+    color: "#F5F3FF",
+    cursor: "pointer",
+    textAlign: "center",
+  },
+  vsArena: {
+    flex: 1,
+    overflowY: "auto",
+    padding: "14px 16px 30px",
+    width: "100%",
+    maxWidth: 560,
+    marginLeft: "auto",
+    marginRight: "auto",
+    boxSizing: "border-box",
+  },
+  vsTopRow: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 6,
+  },
+  vsMiddle: {
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 15,
+    color: "#FFD23F",
+    marginTop: 28,
+  },
+  vsFighterBox: {
+    flex: 1,
+    textAlign: "center",
+  },
+  vsFighterName: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#F5F3FF",
+    minHeight: 30,
+  },
+  vsBoostTag: {
+    display: "block",
+    fontSize: 9,
+    color: "#4AC9FF",
+  },
+  vsFighterMon: {
+    height: 86,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  vsHpTrack: {
+    height: 10,
+    background: "#3A3568",
+    borderRadius: 6,
+    overflow: "hidden",
+    border: "1px solid #4A4580",
+  },
+  vsHpFill: {
+    height: "100%",
+    transition: "width 0.4s ease",
+  },
+  vsHpNum: {
+    fontSize: 10,
+    color: "#B8B3E0",
+    marginTop: 2,
+  },
+  vsCaption: {
+    marginTop: 14,
+    minHeight: 46,
+    background: "#22204A",
+    border: "1px solid #362F66",
+    borderRadius: 12,
+    padding: "10px 12px",
+    fontSize: 13,
+    color: "#F5F3FF",
+    lineHeight: 1.5,
+    textAlign: "center",
+  },
+  vsResultBox: {
+    marginTop: 16,
+    textAlign: "center",
+  },
+  vsResultTitle: {
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 24,
+    color: "#FFD23F",
+  },
+  vsResultSub: {
+    fontSize: 12,
+    color: "#B8B3E0",
+    marginTop: 4,
+    marginBottom: 10,
   },
   challengeRow: {
     display: "flex",
