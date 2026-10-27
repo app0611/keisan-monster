@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20261027-060614";
+var APP_VERSION = "20261027-075817";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -249,7 +249,7 @@ function battleStats(save) {
   const cur = path[idx] || path[0];
   const stageId = cur && cur.id || "egg";
   const def = STAGE_DEFS[stageId] || STAGE_DEFS.egg;
-  const correct = save.correctCount || 0;
+  const correct = save.growth != null && isFinite(save.growth) ? Math.max(0, save.growth) : save.correctCount || 0;
   const fast = Object.values(r.kukuFast || {}).reduce((a, b) => a + b, 0);
   const perfect = r.perfectStages || 0;
   const crit = r.critCount || 0;
@@ -390,15 +390,142 @@ function simulateBattle(rawA, rawB, seed, boostOn = true) {
   log.push({ type: "timeup", winner, hpA: hp[0], hpB: hp[1] });
   return { log, winner, hp, a, b };
 }
+const KANA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみ".split("");
+const KANA_IDX = {};
+KANA.forEach((c, i) => KANA_IDX[c] = i);
+const KANA_FIELDS = [["stage", 5], ["branch", 3], ["rebirth", 3], ["hp", 10], ["atk", 8], ["def", 7], ["spd", 7], ["crit", 6], ["tag", 5]];
+const KANA_DATA_SYMS = 11;
+const KANA_SUM_SYMS = 2;
+const KANA_LEN = KANA_DATA_SYMS + KANA_SUM_SYMS;
+function kanaClamp(v, bits) {
+  const max = (1 << bits) - 1;
+  const n = Math.round(Number(v) || 0);
+  return Math.max(0, Math.min(max, n));
+}
+function kanaValues(st) {
+  return {
+    stage: kanaClamp(Math.max(0, CARD_STAGES.indexOf(st.stageId)), 5),
+    branch: kanaClamp(Math.max(0, CARD_BRANCHES.indexOf(st.branch || "")), 3),
+    rebirth: kanaClamp(st.rebirth, 3),
+    hp: kanaClamp(st.hp, 10),
+    atk: kanaClamp(st.atk, 8),
+    def: kanaClamp(st.def, 7),
+    spd: kanaClamp(st.spd, 7),
+    crit: kanaClamp((st.crit || 0) * 100, 6),
+    tag: kanaClamp(st.tag, 5)
+  };
+}
+function kanaChecksum(syms) {
+  let s = 0;
+  for (let i = 0; i < syms.length; i++) s += (syms[i] + 1) * (2 * i + 1);
+  return s % 1024;
+}
+function encodeKana(st) {
+  const v = kanaValues(st);
+  const bits = [];
+  KANA_FIELDS.forEach(([k, n]) => {
+    for (let i = n - 1; i >= 0; i--) bits.push(v[k] >> i & 1);
+  });
+  while (bits.length < KANA_DATA_SYMS * 5) bits.push(0);
+  const syms = [];
+  for (let i = 0; i < KANA_DATA_SYMS; i++) {
+    let x = 0;
+    for (let j = 0; j < 5; j++) x = x << 1 | bits[i * 5 + j];
+    syms.push(x);
+  }
+  const sum = kanaChecksum(syms);
+  syms.push(sum >> 5 & 31, sum & 31);
+  return syms.map((x) => KANA[x]).join("");
+}
+function decodeKana(text) {
+  const clean = String(text || "").replace(/[^ぁ-ゖ]/g, "");
+  if (clean.length !== KANA_LEN) return null;
+  const syms = [];
+  for (const ch of clean) {
+    const x = KANA_IDX[ch];
+    if (x === void 0) return null;
+    syms.push(x);
+  }
+  const data = syms.slice(0, KANA_DATA_SYMS);
+  const sum = syms[KANA_DATA_SYMS] << 5 | syms[KANA_DATA_SYMS + 1];
+  if (sum !== kanaChecksum(data)) return null;
+  const bits = [];
+  data.forEach((x) => {
+    for (let i = 4; i >= 0; i--) bits.push(x >> i & 1);
+  });
+  let p = 0;
+  const v = {};
+  KANA_FIELDS.forEach(([k, n]) => {
+    let x = 0;
+    for (let i = 0; i < n; i++) x = x << 1 | bits[p++];
+    v[k] = x;
+  });
+  return {
+    player: "あいて",
+    stageId: CARD_STAGES[v.stage] || "egg",
+    branch: CARD_BRANCHES[v.branch] || null,
+    rebirth: v.rebirth,
+    hp: v.hp,
+    atk: v.atk,
+    def: v.def,
+    spd: v.spd,
+    crit: v.crit / 100,
+    tag: v.tag,
+    hat: null
+  };
+}
+function nameTag(name) {
+  const s = String(name || "");
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h % 32;
+}
+function decodeAnyCard(code) {
+  const text = String(code || "").trim();
+  const kana = decodeKana(text);
+  if (kana) return kana;
+  return decodeCard(text);
+}
+function quantCard(st) {
+  if (!st) return st;
+  const back = decodeKana(encodeKana(st));
+  if (!back) return st;
+  return { ...st, ...back, player: st.player, name: st.name, hat: st.hat };
+}
+function cardKey(st) {
+  return [
+    st.stageId,
+    st.branch || "",
+    st.rebirth | 0,
+    st.hp | 0,
+    st.atk | 0,
+    st.def | 0,
+    st.spd | 0,
+    Math.round((st.crit || 0) * 100),
+    st.tag == null ? "" : st.tag
+  ].join(",");
+}
 function runMatch(myStats, myCode, oppStats, oppCode, boostOn) {
   const norm = (st, code) => {
-    const back = decodeCard(code);
-    return back ? { ...st, ...back } : st;
+    const back = decodeAnyCard(code);
+    const merged = back ? { ...st, ...back } : { ...st };
+    if (merged.tag == null) merged.tag = nameTag(merged.player || merged.name || "");
+    return quantCard(merged);
   };
   const meN = norm(myStats, myCode);
   const oppN = norm(oppStats, oppCode);
-  const meFirst = String(myCode) <= String(oppCode);
-  const seed = seedFrom([String(myCode), String(oppCode)].sort().join("|"));
+  const myKey = cardKey(meN);
+  const oppKey = cardKey(oppN);
+  if (myKey === oppKey) {
+    const tie = simulateBattle(meN, oppN, seedFrom(myKey + "|" + oppKey), boostOn);
+    const log = tie.log.filter((e) => e.type !== "win" && e.type !== "timeup").concat([{ type: "timeup", winner: -1 }]);
+    return { ...tie, winner: -1, log };
+  }
+  const meFirst = myKey < oppKey;
+  const seed = seedFrom([myKey, oppKey].sort().join("|"));
   const first = meFirst ? meN : oppN;
   const second = meFirst ? oppN : meN;
   const raw = simulateBattle(first, second, seed, boostOn);
@@ -2245,9 +2372,13 @@ const DIFFICULTIES = [
 ];
 const STAGES_PER_LEVEL = { easy: 4, normal: 3, hard: 2 };
 const DIFF_REWARD = { easy: 0.8, normal: 1, hard: 1.4 };
+const DIFF_GROWTH = { easy: 0.6, normal: 1, hard: 1.7 };
 const DIFF_TIME = { easy: 1.2, normal: 1, hard: 0.85 };
 function diffReward(d) {
   return DIFF_REWARD[d] || 1;
+}
+function diffGrowth(d) {
+  return DIFF_GROWTH[d] || 1;
 }
 function diffTime(d) {
   return DIFF_TIME[d] || 1;
@@ -3529,6 +3660,93 @@ function QrView({ text, size = 212 }) {
     /* @__PURE__ */ React.createElement("g", { fill: "#111111" }, cells)
   );
 }
+function QrPhotoButton({ onFound, onError }) {
+  const ref = useRef(null);
+  const [busy, setBusy] = useState(false);
+  function pick2(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const max = 900;
+        const sc = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.max(40, Math.round(img.width * sc));
+        const h = Math.max(40, Math.round(img.height * sc));
+        const cv = document.createElement("canvas");
+        cv.width = w;
+        cv.height = h;
+        const ctx = cv.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        const d = ctx.getImageData(0, 0, w, h).data;
+        const gray = new Uint8Array(w * h);
+        for (let i = 0, q = 0; i < gray.length; i++, q += 4)
+          gray[i] = d[q] * 77 + d[q + 1] * 150 + d[q + 2] * 29 >> 8;
+        const text = qrDecodeFromGray(gray, w, h);
+        if (text) onFound(text);
+        else onError("しゃしんから QRを よみとれなかったよ。あかるい ところで、QRぜんたいが はいるように とってね");
+      } catch (err) {
+        onError("しゃしんを ひらけなかったよ");
+      }
+      URL.revokeObjectURL(url);
+      setBusy(false);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      setBusy(false);
+      onError("しゃしんを ひらけなかったよ");
+    };
+    img.src = url;
+  }
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      ref,
+      type: "file",
+      accept: "image/*",
+      capture: "environment",
+      onChange: pick2,
+      style: { display: "none" }
+    }
+  ), /* @__PURE__ */ React.createElement("button", { onClick: () => ref.current && ref.current.click(), style: styles.photoBtn }, busy ? "よみとりちゅう…" : "🖼️ しゃしんを とって よみとる"));
+}
+function KanaPad({ onClose, onDone }) {
+  const [text, setText] = useState("");
+  const full = text.length >= KANA_LEN;
+  const slots = [];
+  for (let i = 0; i < KANA_LEN; i++) slots.push(text[i] || "");
+  return /* @__PURE__ */ React.createElement("div", { style: styles.kanaPadWrap }, /* @__PURE__ */ React.createElement("div", { style: styles.kanaPadHead }, /* @__PURE__ */ React.createElement("span", null, "ひらがなコードを いれてね"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, style: styles.scanClose }, "とじる")), /* @__PURE__ */ React.createElement("div", { style: styles.kanaSlots }, slots.map((c, i) => /* @__PURE__ */ React.createElement(
+    "span",
+    {
+      key: i,
+      style: {
+        ...styles.kanaSlot,
+        ...i === text.length ? styles.kanaSlotNow : {}
+      }
+    },
+    c
+  ))), /* @__PURE__ */ React.createElement("div", { style: styles.kanaCount }, text.length, " / ", KANA_LEN, "もじ"), /* @__PURE__ */ React.createElement("div", { style: styles.kanaKeys }, KANA.map((c) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: c,
+      onClick: () => setText((t) => t.length >= KANA_LEN ? t : t + c),
+      disabled: full,
+      style: { ...styles.kanaKey, opacity: full ? 0.4 : 1 }
+    },
+    c
+  ))), /* @__PURE__ */ React.createElement("div", { style: styles.kanaBtnRow }, /* @__PURE__ */ React.createElement("button", { onClick: () => setText((t) => t.slice(0, -1)), style: styles.kanaBack }, "← 1もじ けす"), /* @__PURE__ */ React.createElement("button", { onClick: () => setText(""), style: styles.kanaBack }, "ぜんぶ けす"), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => onDone(text),
+      disabled: !full,
+      style: { ...styles.kanaGo, opacity: full ? 1 : 0.45 }
+    },
+    "⚔️ たたかう!"
+  )));
+}
 function QrScanner({ onFound, onClose }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -3577,22 +3795,36 @@ function QrScanner({ onFound, onClose }) {
         setErr("この ブラウザでは カメラを つかえないみたい。いつもの カメラアプリで QRを よみとってね");
         return;
       }
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
-          audio: false
-        });
-      } catch (e) {
+      const tries = [
+        { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+        { video: { facingMode: "environment" }, audio: false },
+        { video: true, audio: false }
+      ];
+      let lastErr = null;
+      for (const c of tries) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(c);
+          lastErr = null;
+          break;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      if (lastErr) {
+        const e = lastErr;
         const n = e && e.name || "";
         if (n === "NotAllowedError" || n === "SecurityError")
           setErr("カメラを つかう きょかが ないみたい。ブラウザの せっていで カメラを ゆるしてね");
         else if (n === "NotFoundError" || n === "OverconstrainedError")
           setErr("カメラが みつからなかったよ");
-        else setErr("カメラを ひらけなかったよ(" + (n || "げんいん ふめい") + ")");
+        else
+          setErr(
+            "カメラを ひらけなかったよ(" + (n || "げんいん ふめい") + ")。したの「しゃしんを とって よみとる」か、ひらがなコードを つかってね"
+          );
+        return;
+      }
+      if (!stream) {
+        setErr("カメラを ひらけなかったよ。したの「しゃしんを とって よみとる」か、ひらがなコードを つかってね");
         return;
       }
       if (stopRef.current) {
@@ -3621,7 +3853,19 @@ function QrScanner({ onFound, onClose }) {
   }, []);
   return /* @__PURE__ */ React.createElement("div", { style: styles.scanWrap }, /* @__PURE__ */ React.createElement("div", { style: styles.scanHead }, /* @__PURE__ */ React.createElement("span", null, "あいての QRに むけてね"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, style: styles.scanClose }, "とじる")), /* @__PURE__ */ React.createElement("div", { style: styles.scanBox }, /* @__PURE__ */ React.createElement("video", { ref: videoRef, playsInline: true, muted: true, autoPlay: true, style: styles.scanVideo }), /* @__PURE__ */ React.createElement("div", { style: styles.scanGuide }), !ready && !err && /* @__PURE__ */ React.createElement("div", { style: styles.scanLoading }, "カメラを じゅんびちゅう…")), /* @__PURE__ */ React.createElement("canvas", { ref: canvasRef, style: { display: "none" } }), err ? /* @__PURE__ */ React.createElement("div", { style: styles.scanErr }, err) : /* @__PURE__ */ React.createElement("div", { style: styles.scanHint }, "わくの なかに QRぜんたいが はいるように、20〜30cm くらい はなして もってね"));
 }
-function VsBattleView({ battle, step, artStyle, skinMonster, onSkip, onClose }) {
+const CHEER_WORDS = ["がんばれ!", "いけー!", "そこだ!", "やれー!", "ファイト!", "すごい!"];
+const CHEER_EMOJI = ["✨", "🔥", "💪", "⭐", "💥", "🎉"];
+function VsBattleView({
+  battle,
+  step,
+  artStyle,
+  skinMonster,
+  wide,
+  showRotate,
+  onStayPortrait,
+  onSkip,
+  onClose
+}) {
   const { result, me, opp, myName, oppName } = battle;
   const log = result.log;
   const cur = log[Math.min(step, log.length - 1)];
@@ -3638,6 +3882,43 @@ function VsBattleView({ battle, step, artStyle, skinMonster, onSkip, onClose }) 
   const maxB = result.b.hp;
   const nameA = myName || "じぶん";
   const nameB = oppName || opp.player || "あいて";
+  const [cheer, setCheer] = useState(0);
+  const [gauge, setGauge] = useState(0);
+  const [maxCount, setMaxCount] = useState(0);
+  const [maxShow, setMaxShow] = useState(false);
+  const [pops, setPops] = useState([]);
+  const popId = useRef(0);
+  useEffect(() => {
+    if (gauge < 1) return;
+    setGauge(0);
+    setMaxCount((m) => m + 1);
+    setMaxShow(true);
+    const t = setTimeout(() => setMaxShow(false), 1100);
+    return () => clearTimeout(t);
+  }, [gauge]);
+  useEffect(() => {
+    const t = setInterval(() => setGauge((g) => g > 0 ? Math.max(0, g - 0.03) : 0), 320);
+    return () => clearInterval(t);
+  }, []);
+  function tapCheer(e) {
+    if (done) return;
+    let x = 50;
+    let y = 50;
+    try {
+      const r = e.currentTarget.getBoundingClientRect();
+      x = (e.clientX - r.left) / r.width * 100;
+      y = (e.clientY - r.top) / r.height * 100;
+    } catch (err) {
+    }
+    const id = popId.current + 1;
+    popId.current = id;
+    const word = id % 3 === 0;
+    const text = word ? CHEER_WORDS[id % CHEER_WORDS.length] : CHEER_EMOJI[id % CHEER_EMOJI.length];
+    setPops((ps) => ps.slice(-13).concat([{ id, x, y, text, word }]));
+    setTimeout(() => setPops((ps) => ps.filter((q) => q.id !== id)), 900);
+    setCheer((c) => c + 1);
+    setGauge((g) => Math.min(1, g + 0.1));
+  }
   function caption(c) {
     if (!c) return "";
     const who = c.by === 0 ? nameA : nameB;
@@ -3658,16 +3939,6 @@ function VsBattleView({ battle, step, artStyle, skinMonster, onSkip, onClose }) 
   }
   const attackSide = cur && (cur.type === "attack" || cur.type === "miss") ? cur.by : null;
   const hurtSide = cur && cur.type === "attack" ? 1 - cur.by : null;
-  const row = (name, mon, hp, max, side, boost) => /* @__PURE__ */ React.createElement("div", { style: styles.vsFighterBox }, /* @__PURE__ */ React.createElement("div", { style: styles.vsFighterName }, name, boost > 1.01 && /* @__PURE__ */ React.createElement("span", { style: styles.vsBoostTag }, "ブースト ×", boost.toFixed(1))), /* @__PURE__ */ React.createElement("div", { style: styles.vsFighterMon }, mon), /* @__PURE__ */ React.createElement("div", { style: styles.vsHpTrack }, /* @__PURE__ */ React.createElement(
-    "div",
-    {
-      style: {
-        ...styles.vsHpFill,
-        width: `${Math.max(0, hp / max * 100)}%`,
-        background: hp / max > 0.3 ? "#7ED957" : "#FF6B4A"
-      }
-    }
-  )), /* @__PURE__ */ React.createElement("div", { style: styles.vsHpNum }, hp, " / ", max));
   const face = (st, isMe) => {
     var _a;
     return /* @__PURE__ */ React.createElement(
@@ -3680,7 +3951,7 @@ function VsBattleView({ battle, step, artStyle, skinMonster, onSkip, onClose }) 
         MonsterFace,
         {
           stage: { id: st.stageId, ...STAGE_DEFS[st.stageId] },
-          size: 72,
+          size: wide ? 104 : 72,
           artStyle,
           skin: isMe ? skinMonster : null
         }
@@ -3689,8 +3960,67 @@ function VsBattleView({ battle, step, artStyle, skinMonster, onSkip, onClose }) 
     );
   };
   const winner = result.winner;
-  return /* @__PURE__ */ React.createElement("div", { style: styles.dashOverlay }, /* @__PURE__ */ React.createElement("div", { style: styles.dashHeader }, /* @__PURE__ */ React.createElement("span", { style: styles.dashTitle }, "⚔️ しあい"), done ? /* @__PURE__ */ React.createElement("button", { onClick: onClose, style: styles.drawClose }, "✕ とじる") : /* @__PURE__ */ React.createElement("button", { onClick: onSkip, style: styles.drawClose }, "⏩ さいごまで")), /* @__PURE__ */ React.createElement("div", { style: styles.vsArena }, /* @__PURE__ */ React.createElement("div", { style: styles.vsTopRow }, row(nameA, face(result.a, true), hpA, maxA, 0, result.a.boost || 1), /* @__PURE__ */ React.createElement("div", { style: styles.vsMiddle }, "VS"), row(nameB, face(result.b, false), hpB, maxB, 1, result.b.boost || 1)), /* @__PURE__ */ React.createElement("div", { style: styles.vsCaption }, caption(cur)), done && /* @__PURE__ */ React.createElement("div", { style: styles.vsResultBox }, /* @__PURE__ */ React.createElement("div", { style: styles.vsResultTitle }, winner === 0 ? "🏆 かち!" : winner === 1 ? "くやしい… まけ" : "ひきわけ"), /* @__PURE__ */ React.createElement("div", { style: styles.vsResultSub }, winner === 0 ? "けいさんの せいかが でたね!" : winner === 1 ? "もっと けいさんして つよくなろう!" : "いい しょうぶだった!"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, style: styles.evoBtn }, "もどる"))));
+  const fighter = (name, st, hp, max, isMe, boost) => /* @__PURE__ */ React.createElement("div", { style: wide ? styles.vsFighterWide : styles.vsFighterBox }, /* @__PURE__ */ React.createElement("div", { style: styles.vsFighterName }, name, boost > 1.01 && /* @__PURE__ */ React.createElement("span", { style: styles.vsBoostTag }, "ブースト ×", boost.toFixed(1))), /* @__PURE__ */ React.createElement("div", { style: wide ? styles.vsFighterMonWide : styles.vsFighterMon }, face(st, isMe)), /* @__PURE__ */ React.createElement("div", { style: styles.vsHpTrack }, /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      style: {
+        ...styles.vsHpFill,
+        width: `${Math.max(0, hp / max * 100)}%`,
+        background: hp / max > 0.3 ? "#7ED957" : "#FF6B4A"
+      }
+    }
+  )), /* @__PURE__ */ React.createElement("div", { style: styles.vsHpNum }, hp, " / ", max));
+  if (showRotate) {
+    return /* @__PURE__ */ React.createElement("div", { style: styles.dashOverlay }, /* @__PURE__ */ React.createElement("style", null, VS_CSS), /* @__PURE__ */ React.createElement("div", { style: styles.dashHeader }, /* @__PURE__ */ React.createElement("span", { style: styles.dashTitle }, "⚔️ しあい"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, style: styles.drawClose }, "✕ とじる")), /* @__PURE__ */ React.createElement("div", { style: styles.rotateBox }, /* @__PURE__ */ React.createElement("div", { className: "rotate-icon", style: styles.rotateIcon }, "📱"), /* @__PURE__ */ React.createElement("div", { style: styles.rotateTitle }, "たんまつを よこに してね"), /* @__PURE__ */ React.createElement("div", { style: styles.rotateSub }, "よこむきの ほうが モンスターが 大きく みえて、", /* @__PURE__ */ React.createElement("br", null), "おうえんも しやすいよ"), /* @__PURE__ */ React.createElement("button", { onClick: onStayPortrait, style: styles.rotateSkip }, "たてのまま みる")));
+  }
+  return /* @__PURE__ */ React.createElement("div", { style: styles.dashOverlay }, /* @__PURE__ */ React.createElement("style", null, VS_CSS), /* @__PURE__ */ React.createElement("div", { style: wide ? styles.vsHeadWide : styles.dashHeader }, /* @__PURE__ */ React.createElement("span", { style: styles.dashTitle }, "⚔️ しあい"), done ? /* @__PURE__ */ React.createElement("button", { onClick: onClose, style: styles.drawClose }, "✕ とじる") : /* @__PURE__ */ React.createElement("button", { onClick: onSkip, style: styles.drawClose }, "⏩ さいごまで")), /* @__PURE__ */ React.createElement(
+    "div",
+    {
+      style: wide ? styles.vsArenaWide : styles.vsArena,
+      onPointerDown: tapCheer,
+      className: maxShow ? "cheer-max-bg" : void 0
+    },
+    /* @__PURE__ */ React.createElement("div", { style: wide ? styles.vsTopRowWide : styles.vsTopRow }, fighter(nameA, result.a, hpA, maxA, true, result.a.boost || 1), /* @__PURE__ */ React.createElement("div", { style: styles.vsMiddle }, "VS"), fighter(nameB, result.b, hpB, maxB, false, result.b.boost || 1)),
+    /* @__PURE__ */ React.createElement("div", { style: styles.vsCaption }, caption(cur)),
+    !done && /* @__PURE__ */ React.createElement("div", { style: styles.cheerBox }, /* @__PURE__ */ React.createElement("div", { style: styles.cheerTrack }, /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          ...styles.cheerFill,
+          width: `${Math.round(gauge * 100)}%`
+        }
+      }
+    )), /* @__PURE__ */ React.createElement("div", { style: styles.cheerHint }, maxCount > 0 ? `📣 おうえん MAX ${maxCount}かい!` : "📣 がめんを タップして おうえん!")),
+    pops.map((q) => /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        key: q.id,
+        className: "cheer-pop",
+        style: {
+          ...styles.cheerPop,
+          left: `${q.x}%`,
+          top: `${q.y}%`,
+          fontSize: q.word ? 18 : 26,
+          color: q.word ? "#FFD23F" : "#FFFFFF"
+        }
+      },
+      q.text
+    )),
+    maxShow && /* @__PURE__ */ React.createElement("div", { className: "banner-pop", style: styles.cheerMaxBanner }, "📣 おうえん MAX!"),
+    done && /* @__PURE__ */ React.createElement("div", { style: wide ? { ...styles.vsResultBox, ...styles.vsResultWide } : styles.vsResultBox }, /* @__PURE__ */ React.createElement("div", { style: styles.vsResultTitle }, winner === 0 ? "🏆 かち!" : winner === 1 ? "くやしい… まけ" : "ひきわけ"), /* @__PURE__ */ React.createElement("div", { style: styles.vsResultSub }, winner === 0 ? "けいさんの せいかが でたね!" : winner === 1 ? "もっと けいさんして つよくなろう!" : "いい しょうぶだった!"), cheer > 0 && /* @__PURE__ */ React.createElement("div", { style: styles.vsCheerResult }, "📣 おうえん ", cheer, "かい", maxCount > 0 ? ` / MAX ${maxCount}かい` : ""), /* @__PURE__ */ React.createElement("button", { onClick: onClose, style: styles.evoBtn }, "もどる"))
+  ));
 }
+const VS_CSS = `
+  @keyframes cheerPop { 0%{opacity:0; transform:translate(-50%,-50%) scale(0.5)}
+    25%{opacity:1; transform:translate(-50%,-60%) scale(1.25)}
+    100%{opacity:0; transform:translate(-50%,-150%) scale(1)} }
+  .cheer-pop { animation: cheerPop 0.9s ease-out forwards; }
+  @keyframes cheerMaxBg { 0%,100%{box-shadow:inset 0 0 0 0 rgba(255,210,63,0)}
+    50%{box-shadow:inset 0 0 60px 10px rgba(255,210,63,0.35)} }
+  .cheer-max-bg { animation: cheerMaxBg 1.1s ease-out; }
+  @keyframes rotateHint { 0%,55%{transform:rotate(0deg)} 75%,100%{transform:rotate(90deg)} }
+  .rotate-icon { animation: rotateHint 2.2s ease-in-out infinite; }
+`;
 class ErrorCatcher extends React.Component {
   constructor(props) {
     super(props);
@@ -3761,6 +4091,7 @@ function MathMonsterBattle() {
   const [tab, setTab] = useState("battle");
   const [points, setPoints] = useState(0);
   const [correctCount, setCorrectCount] = useState(0);
+  const [growth, setGrowth] = useState(0);
   const [streak, setStreak] = useState(0);
   const [owned, setOwned] = useState([]);
   const [stageNumber, setStageNumber] = useState(1);
@@ -3871,9 +4202,14 @@ function MathMonsterBattle() {
   const [vsBoost, setVsBoost] = useState(true);
   const [vsBattle, setVsBattle] = useState(null);
   const [vsStep, setVsStep] = useState(0);
+  const [isLandscape, setIsLandscape] = useState(
+    () => typeof window === "undefined" ? true : window.innerWidth > window.innerHeight
+  );
+  const [vsStayPortrait, setVsStayPortrait] = useState(false);
   const [vsRecord, setVsRecord] = useState({ win: 0, lose: 0 });
   const [vsPending, setVsPending] = useState(null);
-  const [vsShowQr, setVsShowQr] = useState(true);
+  const [vsShare, setVsShare] = useState("qr");
+  const [kanaOpen, setKanaOpen] = useState(false);
   const [chScore, setChScore] = useState(0);
   const [chLeft, setChLeft] = useState(TIME_ATTACK_SEC);
   const [chResult, setChResult] = useState(null);
@@ -3985,17 +4321,20 @@ function MathMonsterBattle() {
   const streakBonus = stats.streakBonus;
   useEffect(() => {
     (async () => {
-      var _a2, _b2, _c2, _d2, _e2, _f2, _g2, _h2, _i2, _j, _k, _l, _m, _n, _o, _p;
+      var _a2, _b2, _c2, _d2, _e2, _f2, _g2, _h2, _i2, _j, _k, _l, _m, _n, _o, _p, _q;
       try {
         const raw = localStorage.getItem(saveKeyFor(activeId));
         if (raw) {
           const data = JSON.parse(raw);
           setPoints((_a2 = data.points) != null ? _a2 : 0);
           setCorrectCount((_b2 = data.correctCount) != null ? _b2 : 0);
+          setGrowth(
+            data.growth != null && isFinite(data.growth) ? data.growth : (_c2 = data.correctCount) != null ? _c2 : 0
+          );
           const idMap = { sword: "sword1", shield: "shield1" };
-          setOwned(((_c2 = data.owned) != null ? _c2 : []).map((id) => idMap[id] || id));
-          const sn = (_d2 = data.stageNumber) != null ? _d2 : 1;
-          const diff = (_e2 = data.difficulty) != null ? _e2 : "normal";
+          setOwned(((_d2 = data.owned) != null ? _d2 : []).map((id) => idMap[id] || id));
+          const sn = (_e2 = data.stageNumber) != null ? _e2 : 1;
+          const diff = (_f2 = data.difficulty) != null ? _f2 : "normal";
           setStageNumber(sn);
           setDifficulty(diff);
           if (data.artStyle) setArtStyle(data.artStyle);
@@ -4022,24 +4361,24 @@ function MathMonsterBattle() {
           if (data.freeGachaDate) setFreeGachaDate(data.freeGachaDate);
           if (data.equipped) setEquipped((eq) => ({ ...eq, ...data.equipped }));
           if (data.savedAt) setSavedAt(data.savedAt);
-          setEnemyHp((_f2 = data.enemyHp) != null ? _f2 : enemyForStage(sn).hp);
+          setEnemyHp((_g2 = data.enemyHp) != null ? _g2 : enemyForStage(sn).hp);
           if (data.branch) setBranch(data.branch);
           if (data.eggChoiceDone) setEggChoiceDone(true);
-          const savedPath = stagePathFor((_g2 = data.branch) != null ? _g2 : null);
-          const savedExp = typeof data.exp === "number" ? data.exp : (_h2 = data.correctCount) != null ? _h2 : 0;
+          const savedPath = stagePathFor((_h2 = data.branch) != null ? _h2 : null);
+          const savedExp = typeof data.exp === "number" ? data.exp : (_i2 = data.correctCount) != null ? _i2 : 0;
           let stIdx = 0;
           savedPath.forEach((sv, i) => {
             if (savedExp >= sv.threshold) stIdx = i;
           });
           const st = savedPath[stIdx];
-          setPlayerHp((_i2 = data.playerHp) != null ? _i2 : st ? st.maxHp : STAGE_DEFS.egg.maxHp);
-          stageStartPoints.current = (_j = data.points) != null ? _j : 0;
-          const built = buildProblemState(sn, diff, [], (_k = data.mode) != null ? _k : "addsub", (_l = data.selectedTables) != null ? _l : [2, 3, 4, 5], weakInfo);
+          setPlayerHp((_j = data.playerHp) != null ? _j : st ? st.maxHp : STAGE_DEFS.egg.maxHp);
+          stageStartPoints.current = (_k = data.points) != null ? _k : 0;
+          const built = buildProblemState(sn, diff, [], (_l = data.mode) != null ? _l : "addsub", (_m = data.selectedTables) != null ? _m : [2, 3, 4, 5], weakInfo);
           setProblem(built.problem);
           setChoices(built.choices);
-          const loadedMode = (_m = data.mode) != null ? _m : "addsub";
+          const loadedMode = (_n = data.mode) != null ? _n : "addsub";
           const loadedLim = Math.round(
-            built.timeLimit * (BRANCH_BONUS[data.branch] && BRANCH_BONUS[data.branch].timeMult || 1) * stageTimeFactor((_n = data.stageNumber) != null ? _n : 1, isBossStage((_o = data.stageNumber) != null ? _o : 1)) * timeMultFor(loadedMode) * diffTime((_p = data.difficulty) != null ? _p : "normal")
+            built.timeLimit * (BRANCH_BONUS[data.branch] && BRANCH_BONUS[data.branch].timeMult || 1) * stageTimeFactor((_o = data.stageNumber) != null ? _o : 1, isBossStage((_p = data.stageNumber) != null ? _p : 1)) * timeMultFor(loadedMode) * diffTime((_q = data.difficulty) != null ? _q : "normal")
           );
           setTimeLimit(loadedLim);
           setCurrentLevel(built.level);
@@ -4062,6 +4401,7 @@ function MathMonsterBattle() {
           JSON.stringify({
             points,
             correctCount,
+            growth,
             owned,
             stageNumber,
             enemyHp,
@@ -4103,6 +4443,7 @@ function MathMonsterBattle() {
     activeId,
     points,
     correctCount,
+    growth,
     owned,
     stageNumber,
     enemyHp,
@@ -4136,6 +4477,7 @@ function MathMonsterBattle() {
     }
     setPoints(0);
     setCorrectCount(0);
+    setGrowth(0);
     setOwned([]);
     setBag({});
     setSandLeft(0);
@@ -4424,6 +4766,7 @@ function MathMonsterBattle() {
       if (ok) {
         setChScore((n) => n + 1);
         setCorrectCount((c) => c + 1);
+        setGrowth((g) => g + diffGrowth(difficulty));
         setFeedback({ type: "correct" });
         setFloatingText("+1");
       } else {
@@ -4470,6 +4813,7 @@ function MathMonsterBattle() {
       });
       setPoints((p) => p + gained);
       setCorrectCount((c) => c + 1);
+      setGrowth((g) => g + diffGrowth(difficulty));
       const exactExp = EXP_PER_CORRECT * rewardMult(mode) * diffReward(difficulty) + expFracRef.current;
       const gainedExp = Math.floor(exactExp);
       expFracRef.current = exactExp - gainedExp;
@@ -4697,7 +5041,18 @@ function MathMonsterBattle() {
     return () => clearInterval(chTickRef.current);
   }, [challenge, screen]);
   useEffect(() => {
+    const onRz = () => setIsLandscape(window.innerWidth > window.innerHeight);
+    window.addEventListener("resize", onRz);
+    window.addEventListener("orientationchange", onRz);
+    return () => {
+      window.removeEventListener("resize", onRz);
+      window.removeEventListener("orientationchange", onRz);
+    };
+  }, []);
+  const vsShowRotate = !isLandscape && !vsStayPortrait;
+  useEffect(() => {
     if (!vsBattle) return;
+    if (vsShowRotate) return;
     const total = vsBattle.result.log.length;
     if (vsStep >= total - 1) {
       if (vsStep === total - 1) {
@@ -4719,7 +5074,7 @@ function MathMonsterBattle() {
     const wait = cur && cur.type === "start" ? 900 : 850;
     const t = setTimeout(() => setVsStep((n) => n + 1), wait);
     return () => clearTimeout(t);
-  }, [vsBattle, vsStep]);
+  }, [vsBattle, vsStep, vsShowRotate]);
   useEffect(() => {
     if (!loaded) return;
     try {
@@ -4991,6 +5346,7 @@ function MathMonsterBattle() {
       exp,
       rebirth,
       correctCount,
+      growth,
       artStyle,
       myMonsters,
       skinId,
@@ -4999,9 +5355,13 @@ function MathMonsterBattle() {
   }
   let myCardStats;
   let myCode = "";
+  let myKana = "";
   try {
     myCardStats = battleStats(currentSave());
+    myCardStats.player = activeProfile.name;
+    myCardStats.tag = nameTag(activeProfile.name);
     myCode = encodeCard(myCardStats, activeProfile.name);
+    myKana = encodeKana(myCardStats);
   } catch (e) {
     myCardStats = {
       name: stage.name,
@@ -5015,8 +5375,15 @@ function MathMonsterBattle() {
       atk: 5,
       def: 0,
       spd: 5,
-      crit: 0.05
+      crit: 0.05,
+      player: activeProfile.name,
+      tag: nameTag(activeProfile.name)
     };
+    try {
+      myKana = encodeKana(myCardStats);
+    } catch (e2) {
+      myKana = "";
+    }
   }
   const myVsUrl = (() => {
     try {
@@ -5034,6 +5401,14 @@ function MathMonsterBattle() {
       setVsMsg("コピーできなかったので、ながおしして コピーしてね");
     }
   }
+  async function copyMyKana() {
+    try {
+      await navigator.clipboard.writeText(myKana);
+      setItemToast("📋 ひらがなコードを コピーしたよ");
+    } catch (e) {
+      setVsMsg("コピーできなかったので、ながおしして コピーしてね");
+    }
+  }
   async function copyMyCode() {
     try {
       await navigator.clipboard.writeText(myCode);
@@ -5046,9 +5421,12 @@ function MathMonsterBattle() {
     let code = String(input || "").trim();
     const m = code.match(/[?&]vs=([^&\s]+)/);
     if (m) code = m[1];
-    const opp = decodeCard(code);
+    const opp = decodeAnyCard(code);
     if (!opp) {
-      setVsMsg("コードが ただしくないみたい。もういちど かくにんしてね");
+      const kana = String(input || "").replace(/[^ぁ-ゖ]/g, "");
+      setVsMsg(
+        kana.length > 0 && kana.length !== KANA_LEN ? `ひらがなコードは ${KANA_LEN}もじだよ(いまは ${kana.length}もじ)` : "コードが ただしくないみたい。もういちど かくにんしてね"
+      );
       return;
     }
     const result = runMatch(myCardStats, myCode, opp, String(code).trim(), vsBoost);
@@ -5379,6 +5757,7 @@ function MathMonsterBattle() {
     setRebirth((n) => n + 1);
     setExp(0);
     setCorrectCount(0);
+    setGrowth(0);
     setStreak(0);
     setBranch(null);
     setBranchPrompt(false);
@@ -5444,10 +5823,44 @@ function MathMonsterBattle() {
       ["すばやさ", myCardStats.spd, "💨"],
       ["かいしん", `${Math.round(myCardStats.crit * 100)}%`, "✨"],
       ["わざ", skillFor(myCardStats.branch).name, skillFor(myCardStats.branch).emoji]
-    ].map(([k, v, e]) => /* @__PURE__ */ React.createElement("div", { key: k, style: styles.vsStatCell }, /* @__PURE__ */ React.createElement("div", { style: styles.vsStatLabel }, e, " ", k), /* @__PURE__ */ React.createElement("div", { style: styles.vsStatValue }, v)))), /* @__PURE__ */ React.createElement("div", { style: styles.vsNote }, "けいさんを がんばるほど つよくなるよ(せいかいすう・はやさ・ノーミス・会心)")), /* @__PURE__ */ React.createElement("div", { style: styles.dashSection }, "あいてに みせる QR"), vsShowQr ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.qrWrap }, /* @__PURE__ */ React.createElement(QrView, { text: myVsUrl, size: 212 })), /* @__PURE__ */ React.createElement("div", { style: styles.dashNote }, "あいての カメラアプリで この QRを よみこむと、たいせん画面が ひらくよ。", /* @__PURE__ */ React.createElement("br", null), "(おなじ URLを ホーム画面に いれている人どうしで つかえます)")) : /* @__PURE__ */ React.createElement("div", { style: styles.vsCodeBox }, myCode), /* @__PURE__ */ React.createElement("div", { style: styles.backupBox }, /* @__PURE__ */ React.createElement("button", { onClick: () => setVsShowQr((v) => !v), style: styles.backupBtnOutline }, vsShowQr ? "🔢 もじの コード" : "📷 QRを みせる"), /* @__PURE__ */ React.createElement("button", { onClick: vsShowQr ? copyMyUrl : copyMyCode, style: styles.backupBtn }, "📋 ", vsShowQr ? "リンクを コピー" : "コードを コピー")), /* @__PURE__ */ React.createElement("div", { style: styles.dashSection }, "あいての コードを いれる"), /* @__PURE__ */ React.createElement("button", { onClick: () => {
+    ].map(([k, v, e]) => /* @__PURE__ */ React.createElement("div", { key: k, style: styles.vsStatCell }, /* @__PURE__ */ React.createElement("div", { style: styles.vsStatLabel }, e, " ", k), /* @__PURE__ */ React.createElement("div", { style: styles.vsStatValue }, v)))), /* @__PURE__ */ React.createElement("div", { style: styles.vsNote }, "けいさんを がんばるほど つよくなるよ(せいかいすう・はやさ・ノーミス・会心)")), /* @__PURE__ */ React.createElement("div", { style: styles.dashSection }, "あいてに みせる QR"), vsShare === "qr" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.qrWrap }, /* @__PURE__ */ React.createElement(QrView, { text: myVsUrl, size: 212 })), /* @__PURE__ */ React.createElement("div", { style: styles.dashNote }, "あいての カメラアプリで この QRを よみこむと、たいせん画面が ひらくよ。", /* @__PURE__ */ React.createElement("br", null), "(おなじ URLを ホーム画面に いれている人どうしで つかえます)")), vsShare === "kana" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.kanaCodeBox }, myKana.split("").map((c, i) => /* @__PURE__ */ React.createElement("span", { key: i, style: styles.kanaCodeChar }, c))), /* @__PURE__ */ React.createElement("div", { style: styles.dashNote }, "この 13もじを あいてに よんで もらって、", /* @__PURE__ */ React.createElement("br", null), "あいての たんまつに いれて もらってね")), vsShare === "text" && /* @__PURE__ */ React.createElement("div", { style: styles.vsCodeBox }, myCode), /* @__PURE__ */ React.createElement("div", { style: styles.shareTabRow }, [
+      { id: "qr", label: "📷 QR" },
+      { id: "kana", label: "あ ひらがな" },
+      { id: "text", label: "🔢 もじ" }
+    ].map((t) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: t.id,
+        onClick: () => setVsShare(t.id),
+        style: {
+          ...styles.shareTab,
+          ...vsShare === t.id ? styles.shareTabOn : {}
+        }
+      },
+      t.label
+    ))), /* @__PURE__ */ React.createElement("div", { style: styles.backupBox }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: vsShare === "qr" ? copyMyUrl : vsShare === "kana" ? copyMyKana : copyMyCode,
+        style: styles.backupBtn
+      },
+      "📋 コピー"
+    )), /* @__PURE__ */ React.createElement("div", { style: styles.dashSection }, "あいての コードを いれる"), /* @__PURE__ */ React.createElement("button", { onClick: () => {
       setVsMsg("");
       setScanOpen(true);
-    }, style: styles.scanOpenBtn }, "📷 カメラで QRを よみとる"), /* @__PURE__ */ React.createElement("div", { style: styles.dashNote }, "カメラが つかえないときは、もらった コードや リンクを ここに はりつけてね"), /* @__PURE__ */ React.createElement(
+    }, style: styles.scanOpenBtn }, "📷 カメラで QRを よみとる"), /* @__PURE__ */ React.createElement(
+      QrPhotoButton,
+      {
+        onFound: (text) => {
+          setVsInput(text);
+          startVs(text);
+        },
+        onError: (m) => setVsMsg(m)
+      }
+    ), /* @__PURE__ */ React.createElement("button", { onClick: () => {
+      setVsMsg("");
+      setKanaOpen(true);
+    }, style: styles.kanaOpenBtn }, "あ ひらがなコードを いれる(13もじ)"), /* @__PURE__ */ React.createElement("div", { style: styles.dashNote }, "カメラが つかえないときは、ひらがなコードか、", /* @__PURE__ */ React.createElement("br", null), "もらった コードや リンクを ここに はりつけてね"), /* @__PURE__ */ React.createElement(
       "textarea",
       {
         value: vsInput,
@@ -5463,7 +5876,17 @@ function MathMonsterBattle() {
         style: { ...styles.vsStartBtn, opacity: vsInput.trim() ? 1 : 0.5 }
       },
       "⚔️ たたかう!"
-    ), vsMsg && /* @__PURE__ */ React.createElement("div", { style: styles.vsErr }, vsMsg), scanOpen && /* @__PURE__ */ React.createElement(
+    ), vsMsg && /* @__PURE__ */ React.createElement("div", { style: styles.vsErr }, vsMsg), kanaOpen && /* @__PURE__ */ React.createElement(
+      KanaPad,
+      {
+        onClose: () => setKanaOpen(false),
+        onDone: (text) => {
+          setKanaOpen(false);
+          setVsInput(text);
+          startVs(text);
+        }
+      }
+    ), scanOpen && /* @__PURE__ */ React.createElement(
       QrScanner,
       {
         onClose: () => setScanOpen(false),
@@ -5493,6 +5916,9 @@ function MathMonsterBattle() {
       {
         battle: vsBattle,
         step: vsStep,
+        wide: isLandscape,
+        showRotate: vsShowRotate,
+        onStayPortrait: () => setVsStayPortrait(true),
         artStyle,
         skinMonster,
         onSkip: () => setVsStep(vsBattle.result.log.length - 1),
@@ -5767,11 +6193,22 @@ function MathMonsterBattle() {
       },
       "×",
       DIFF_REWARD[d.id]
+    ))), /* @__PURE__ */ React.createElement("div", { style: styles.diffGrowthNote }, "たいせんの つよさの のび", /* @__PURE__ */ React.createElement("span", { style: styles.diffGrowthNow }, "×", diffGrowth(difficulty))), /* @__PURE__ */ React.createElement("div", { style: styles.diffRewardRow }, DIFFICULTIES.map((d) => /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        key: d.id,
+        style: {
+          ...styles.gradeRewardCell,
+          color: difficulty === d.id ? "#4AC9FF" : "#6F6A9C"
+        }
+      },
+      "×",
+      DIFF_GROWTH[d.id]
     ))), /* @__PURE__ */ React.createElement("button", { className: "start-btn", onClick: handleStart, style: styles.startBtn }, hasProgress ? "つづきから ▶" : "はじめる ▶"), /* @__PURE__ */ React.createElement("div", { style: styles.homeNavRow }, [
       { id: "dex", label: "ずかん", emoji: "📖" },
       { id: "shop", label: "ショップ", emoji: "🛒" },
       { id: "gacha", label: "ガチャ", emoji: "🎁" }
-    ].map((t) => /* @__PURE__ */ React.createElement("button", { key: t.id, onClick: () => enterGame(t.id), style: styles.homeNavBtn }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 19 } }, t.emoji), /* @__PURE__ */ React.createElement("span", { style: styles.homeNavLabel }, t.label), t.id === "gacha" && freeGachaAvailable && /* @__PURE__ */ React.createElement("span", { style: styles.freeDot }, "むりょう"), t.id === "dex" && myMonsters.length === 0 && /* @__PURE__ */ React.createElement("span", { style: styles.freeDot }, "おえかき")))), /* @__PURE__ */ React.createElement("div", { style: styles.challengeRow }, /* @__PURE__ */ React.createElement("button", { onClick: () => startChallenge("timeattack"), style: styles.chBtn }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 17 } }, "⏱️"), /* @__PURE__ */ React.createElement("span", { style: styles.chBtnLabel }, "タイムアタック"), /* @__PURE__ */ React.createElement("span", { style: styles.chBest }, "さいこう ", records.bestTimeAttack || 0, "もん")), /* @__PURE__ */ React.createElement("button", { onClick: () => startChallenge("survival"), style: styles.chBtn }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 17 } }, "💀"), /* @__PURE__ */ React.createElement("span", { style: styles.chBtnLabel }, "サバイバル"), /* @__PURE__ */ React.createElement("span", { style: styles.chBest }, "さいこう ", records.bestSurvival || 0, "もん"))), /* @__PURE__ */ React.createElement("div", { style: styles.challengeRow }, /* @__PURE__ */ React.createElement("button", { onClick: () => setVsOpen(true), style: { ...styles.chBtn, flex: 1 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 17 } }, "⚔️"), /* @__PURE__ */ React.createElement("span", { style: styles.chBtnLabel }, "たいせん"), /* @__PURE__ */ React.createElement("span", { style: styles.chBest }, "そうごうりょく ", battlePower(myCardStats)))), towerUnlocked && /* @__PURE__ */ React.createElement("div", { style: styles.towerBox }, towerMode ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { onClick: resumeTower, style: styles.towerBtn }, "🗼 タワー ", towerFloor, "かいから つづける"), /* @__PURE__ */ React.createElement("div", { style: styles.towerSubRow }, /* @__PURE__ */ React.createElement("button", { onClick: startTower, style: styles.towerSmallBtn }, "1かいから やりなおす"), /* @__PURE__ */ React.createElement("button", { onClick: quitTower, style: styles.towerSmallBtn }, "タワーを やめる"))) : /* @__PURE__ */ React.createElement("button", { onClick: startTower, style: styles.towerBtn }, "🗼 エンドレスタワーに いどむ"), /* @__PURE__ */ React.createElement("div", { style: styles.towerBest }, "さいこう きろく: ", bestFloor > 0 ? `${bestFloor}かい` : "まだ なし")), isFinalForm && /* @__PURE__ */ React.createElement("div", { style: styles.towerBox }, confirmRebirth ? /* @__PURE__ */ React.createElement("div", { style: styles.resetConfirmRow }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#FFB199" } }, "たまごに もどる?"), /* @__PURE__ */ React.createElement("button", { onClick: doRebirth, style: styles.resetYesBtn }, "てんせい"), /* @__PURE__ */ React.createElement("button", { onClick: () => setConfirmRebirth(false), style: styles.resetNoBtn }, "やめる")) : /* @__PURE__ */ React.createElement("button", { onClick: () => setConfirmRebirth(true), style: styles.rebirthBtn }, "🔄 てんせいする(そうびは そのまま)"), /* @__PURE__ */ React.createElement("div", { style: styles.towerBest }, "てんせいすると こうげき+1 ・ ポイント+10% ・ みちを えらびなおせる")), /* @__PURE__ */ React.createElement("button", { onClick: () => setDashOpen(true), style: styles.dashOpenBtn }, "📊 まなびの きろく(ほごしゃむけ)"), /* @__PURE__ */ React.createElement("div", { style: styles.saveBox }, !saveSupported ? /* @__PURE__ */ React.createElement("div", { style: { color: "#FFB199", fontSize: 11 } }, "⚠ このかんきょうでは きろくを ほぞんできません") : savedAt ? /* @__PURE__ */ React.createElement("div", { style: { color: "#8A85B8", fontSize: 11 } }, "💾 じどうセーブずみ(", new Date(savedAt).toLocaleString("ja-JP", {
+    ].map((t) => /* @__PURE__ */ React.createElement("button", { key: t.id, onClick: () => enterGame(t.id), style: styles.homeNavBtn }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 19 } }, t.emoji), /* @__PURE__ */ React.createElement("span", { style: styles.homeNavLabel }, t.label), t.id === "gacha" && freeGachaAvailable && /* @__PURE__ */ React.createElement("span", { style: styles.freeDot }, "むりょう"), t.id === "dex" && myMonsters.length === 0 && /* @__PURE__ */ React.createElement("span", { style: styles.freeDot }, "おえかき")))), /* @__PURE__ */ React.createElement("div", { style: styles.challengeRow }, /* @__PURE__ */ React.createElement("button", { onClick: () => startChallenge("timeattack"), style: styles.chBtn }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 17 } }, "⏱️"), /* @__PURE__ */ React.createElement("span", { style: styles.chBtnLabel }, "タイムアタック"), /* @__PURE__ */ React.createElement("span", { style: styles.chBest }, "さいこう ", records.bestTimeAttack || 0, "もん")), /* @__PURE__ */ React.createElement("button", { onClick: () => startChallenge("survival"), style: styles.chBtn }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 17 } }, "💀"), /* @__PURE__ */ React.createElement("span", { style: styles.chBtnLabel }, "サバイバル"), /* @__PURE__ */ React.createElement("span", { style: styles.chBest }, "さいこう ", records.bestSurvival || 0, "もん"))), /* @__PURE__ */ React.createElement("div", { style: styles.challengeRow }, /* @__PURE__ */ React.createElement("button", { onClick: () => setVsOpen(true), style: { ...styles.chBtn, flex: 1 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 17 } }, "⚔️"), /* @__PURE__ */ React.createElement("span", { style: styles.chBtnLabel }, "たいせん"), /* @__PURE__ */ React.createElement("span", { style: styles.chBest }, "そうごうりょく ", battlePower(myCardStats)))), !towerUnlocked && /* @__PURE__ */ React.createElement("div", { style: styles.towerBox }, /* @__PURE__ */ React.createElement("div", { style: styles.towerLockBtn }, "🔒 エンドレスタワー"), /* @__PURE__ */ React.createElement("div", { style: styles.towerBest }, "モンスターを さいごまで しんかさせると あそべるよ")), towerUnlocked && /* @__PURE__ */ React.createElement("div", { style: styles.towerBox }, towerMode ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { onClick: resumeTower, style: styles.towerBtn }, "🗼 タワー ", towerFloor, "かいから つづける"), /* @__PURE__ */ React.createElement("div", { style: styles.towerSubRow }, /* @__PURE__ */ React.createElement("button", { onClick: startTower, style: styles.towerSmallBtn }, "1かいから やりなおす"), /* @__PURE__ */ React.createElement("button", { onClick: quitTower, style: styles.towerSmallBtn }, "タワーを やめる"))) : /* @__PURE__ */ React.createElement("button", { onClick: startTower, style: styles.towerBtn }, "🗼 エンドレスタワーに いどむ"), /* @__PURE__ */ React.createElement("div", { style: styles.towerBest }, "さいこう きろく: ", bestFloor > 0 ? `${bestFloor}かい` : "まだ なし")), !isFinalForm && /* @__PURE__ */ React.createElement("div", { style: styles.towerBox }, /* @__PURE__ */ React.createElement("div", { style: styles.towerLockBtn }, "🔒 てんせい"), /* @__PURE__ */ React.createElement("div", { style: styles.towerBest }, "モンスターが さいごまで しんかすると できるよ", /* @__PURE__ */ React.createElement("br", null), "てんせいすると こうげき+1 ・ ポイント+10% ・ みちを えらびなおせる")), isFinalForm && /* @__PURE__ */ React.createElement("div", { style: styles.towerBox }, confirmRebirth ? /* @__PURE__ */ React.createElement("div", { style: styles.resetConfirmRow }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: "#FFB199" } }, "たまごに もどる?"), /* @__PURE__ */ React.createElement("button", { onClick: doRebirth, style: styles.resetYesBtn }, "てんせい"), /* @__PURE__ */ React.createElement("button", { onClick: () => setConfirmRebirth(false), style: styles.resetNoBtn }, "やめる")) : /* @__PURE__ */ React.createElement("button", { onClick: () => setConfirmRebirth(true), style: styles.rebirthBtn }, "🔄 てんせいする(そうびは そのまま)"), /* @__PURE__ */ React.createElement("div", { style: styles.towerBest }, "てんせいすると こうげき+1 ・ ポイント+10% ・ みちを えらびなおせる")), /* @__PURE__ */ React.createElement("button", { onClick: () => setDashOpen(true), style: styles.dashOpenBtn }, "📊 まなびの きろく(ほごしゃむけ)"), /* @__PURE__ */ React.createElement("div", { style: styles.saveBox }, !saveSupported ? /* @__PURE__ */ React.createElement("div", { style: { color: "#FFB199", fontSize: 11 } }, "⚠ このかんきょうでは きろくを ほぞんできません") : savedAt ? /* @__PURE__ */ React.createElement("div", { style: { color: "#8A85B8", fontSize: 11 } }, "💾 じどうセーブずみ(", new Date(savedAt).toLocaleString("ja-JP", {
       month: "numeric",
       day: "numeric",
       hour: "2-digit",
@@ -7199,6 +7636,159 @@ const styles = {
     WebkitUserSelect: "text",
     userSelect: "text"
   },
+  photoBtn: {
+    width: "100%",
+    padding: "13px 10px",
+    fontSize: 16,
+    fontWeight: 800,
+    color: "#0F172A",
+    background: "linear-gradient(180deg,#A7F3D0,#34D399)",
+    border: "none",
+    borderRadius: 14,
+    cursor: "pointer",
+    marginBottom: 10
+  },
+  kanaOpenBtn: {
+    width: "100%",
+    padding: "13px 10px",
+    fontSize: 16,
+    fontWeight: 800,
+    color: "#2A1A00",
+    background: "linear-gradient(180deg,#FFE08A,#FFB83F)",
+    border: "none",
+    borderRadius: 14,
+    cursor: "pointer",
+    marginBottom: 10
+  },
+  shareTabRow: {
+    display: "flex",
+    gap: 6,
+    marginTop: 8
+  },
+  shareTab: {
+    flex: 1,
+    padding: "9px 4px",
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#8A85B8",
+    background: "#221F47",
+    border: "2px solid #362F66",
+    borderRadius: 12,
+    cursor: "pointer"
+  },
+  shareTabOn: {
+    color: "#1B1B3A",
+    background: "#FFD23F",
+    border: "2px solid #FFD23F"
+  },
+  kanaCodeBox: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 4,
+    padding: "12px 8px",
+    background: "#221F47",
+    border: "2px solid #4A4280",
+    borderRadius: 14
+  },
+  kanaCodeChar: {
+    minWidth: 26,
+    textAlign: "center",
+    fontSize: 21,
+    fontWeight: 800,
+    color: "#FFD23F",
+    background: "#16142F",
+    borderRadius: 7,
+    padding: "3px 2px"
+  },
+  kanaPadWrap: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 130,
+    background: "#16142F",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    padding: "calc(env(safe-area-inset-top) + 10px) 12px calc(env(safe-area-inset-bottom) + 12px)",
+    overflowY: "auto"
+  },
+  kanaPadHead: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    color: "#F5F3FF",
+    fontSize: 15,
+    fontWeight: 800
+  },
+  kanaSlots: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 3
+  },
+  kanaSlot: {
+    width: 24,
+    height: 32,
+    lineHeight: "32px",
+    textAlign: "center",
+    fontSize: 18,
+    fontWeight: 800,
+    color: "#FFD23F",
+    background: "#221F47",
+    border: "2px solid #362F66",
+    borderRadius: 6
+  },
+  kanaSlotNow: {
+    border: "2px solid #FFD23F"
+  },
+  kanaCount: {
+    textAlign: "center",
+    fontSize: 12,
+    color: "#8A85B8",
+    fontWeight: 700
+  },
+  kanaKeys: {
+    display: "grid",
+    gridTemplateColumns: "repeat(8, 1fr)",
+    gap: 5
+  },
+  kanaKey: {
+    padding: "11px 0",
+    fontSize: 19,
+    fontWeight: 800,
+    color: "#F5F3FF",
+    background: "#2A2654",
+    border: "1px solid #4A4280",
+    borderRadius: 9,
+    cursor: "pointer"
+  },
+  kanaBtnRow: {
+    display: "flex",
+    gap: 6,
+    alignItems: "stretch"
+  },
+  kanaBack: {
+    flex: 1,
+    padding: "12px 4px",
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#C9C4F0",
+    background: "#2A2654",
+    border: "2px solid #4A4280",
+    borderRadius: 12,
+    cursor: "pointer"
+  },
+  kanaGo: {
+    flex: 1.4,
+    padding: "12px 4px",
+    fontSize: 15,
+    fontWeight: 800,
+    color: "#2A1A00",
+    background: "linear-gradient(180deg,#FFD23F,#FF8A4A)",
+    border: "none",
+    borderRadius: 12,
+    cursor: "pointer"
+  },
   scanOpenBtn: {
     width: "100%",
     padding: "14px 10px",
@@ -7376,7 +7966,135 @@ const styles = {
     cursor: "pointer",
     textAlign: "center"
   },
+  vsHeadWide: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "6px calc(10px + env(safe-area-inset-right)) 4px calc(10px + env(safe-area-inset-left))",
+    flexShrink: 0
+  },
+  vsArenaWide: {
+    position: "relative",
+    flex: 1,
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    gap: 6,
+    padding: "2px calc(14px + env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left))",
+    boxSizing: "border-box",
+    overflow: "hidden",
+    touchAction: "manipulation"
+  },
+  vsTopRowWide: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 18
+  },
+  vsFighterWide: {
+    flex: 1,
+    maxWidth: 260,
+    textAlign: "center"
+  },
+  vsFighterMonWide: {
+    minHeight: 112,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  rotateBox: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    padding: "0 26px",
+    textAlign: "center"
+  },
+  rotateIcon: {
+    fontSize: 58,
+    display: "inline-block"
+  },
+  rotateTitle: {
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 19,
+    color: "#F5F3FF"
+  },
+  rotateSub: {
+    fontSize: 13,
+    color: "#8A85B8",
+    lineHeight: 1.7
+  },
+  rotateSkip: {
+    marginTop: 8,
+    padding: "10px 20px",
+    fontSize: 14,
+    fontWeight: 800,
+    color: "#C9C4F0",
+    background: "#2A2654",
+    border: "2px solid #4A4280",
+    borderRadius: 18,
+    cursor: "pointer"
+  },
+  cheerBox: {
+    width: "100%",
+    maxWidth: 420,
+    margin: "0 auto",
+    textAlign: "center"
+  },
+  cheerTrack: {
+    height: 8,
+    borderRadius: 6,
+    background: "#2A2654",
+    overflow: "hidden"
+  },
+  cheerFill: {
+    height: "100%",
+    borderRadius: 6,
+    background: "linear-gradient(90deg,#FF8A4A,#FFD23F)",
+    transition: "width 0.12s ease-out"
+  },
+  cheerHint: {
+    marginTop: 4,
+    fontSize: 11,
+    color: "#8A85B8",
+    fontWeight: 700
+  },
+  cheerPop: {
+    position: "absolute",
+    transform: "translate(-50%,-50%)",
+    fontWeight: 800,
+    textShadow: "0 2px 6px rgba(0,0,0,0.6)",
+    pointerEvents: "none",
+    zIndex: 5
+  },
+  cheerMaxBanner: {
+    position: "absolute",
+    left: "50%",
+    top: "14%",
+    transform: "translateX(-50%)",
+    background: "linear-gradient(180deg,#FFD23F,#FF8A4A)",
+    color: "#3A2A00",
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 18,
+    padding: "7px 20px",
+    borderRadius: 16,
+    pointerEvents: "none",
+    zIndex: 6
+  },
+  vsCheerResult: {
+    fontSize: 12,
+    color: "#FFD23F",
+    fontWeight: 700,
+    marginTop: 2
+  },
   vsArena: {
+    position: "relative",
+    touchAction: "manipulation",
     flex: 1,
     overflowY: "auto",
     padding: "14px 16px 30px",
@@ -7450,6 +8168,20 @@ const styles = {
   vsResultBox: {
     marginTop: 16,
     textAlign: "center"
+  },
+  vsResultWide: {
+    position: "absolute",
+    left: "50%",
+    top: "50%",
+    transform: "translate(-50%,-50%)",
+    zIndex: 8,
+    marginTop: 0,
+    width: "min(86%, 380px)",
+    padding: "16px 18px 14px",
+    background: "#221F47",
+    border: "2px solid #4A4280",
+    borderRadius: 20,
+    boxShadow: "0 12px 44px rgba(0,0,0,0.6)"
   },
   vsResultTitle: {
     fontFamily: "'Baloo 2', sans-serif",
@@ -7578,6 +8310,28 @@ const styles = {
     color: "#8A85B8",
     fontSize: 10.5,
     cursor: "pointer"
+  },
+  diffGrowthNote: {
+    marginTop: 6,
+    fontSize: 11,
+    color: "#8A85B8",
+    textAlign: "center"
+  },
+  diffGrowthNow: {
+    marginLeft: 6,
+    color: "#4AC9FF",
+    fontWeight: 800
+  },
+  towerLockBtn: {
+    background: "#2A2654",
+    color: "#8A85B8",
+    border: "2px dashed #4A4280",
+    borderRadius: 22,
+    padding: "10px 24px",
+    fontFamily: "'Baloo 2', sans-serif",
+    fontWeight: 800,
+    fontSize: 14,
+    textAlign: "center"
   },
   towerBest: {
     fontSize: 10.5,
