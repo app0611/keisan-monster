@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20261027-075817";
+var APP_VERSION = "20261027-195541";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -3747,6 +3747,223 @@ function KanaPad({ onClose, onDone }) {
     "⚔️ たたかう!"
   )));
 }
+async function askLandscape() {
+  try {
+    if (window.innerWidth > window.innerHeight) return true;
+    if (!navigator.maxTouchPoints) return false;
+    const o = window.screen && window.screen.orientation;
+    if (!o || !o.lock) return false;
+    const el = document.documentElement;
+    if (!document.fullscreenElement && el.requestFullscreen) {
+      await el.requestFullscreen({ navigationUI: "hide" });
+    }
+    try {
+      await o.lock("landscape");
+      return true;
+    } catch (e2) {
+      releaseLandscape();
+      return false;
+    }
+  } catch (e) {
+  }
+  return false;
+}
+function releaseLandscape() {
+  try {
+    const o = window.screen && window.screen.orientation;
+    if (o && o.unlock) o.unlock();
+  } catch (e) {
+  }
+  try {
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
+  } catch (e) {
+  }
+}
+const CHARGE_TAPS = 20;
+function LocalVsView({
+  a,
+  b,
+  nameA,
+  nameB,
+  artStyle,
+  skinA,
+  skinB,
+  boost,
+  wide,
+  showRotate,
+  onStayPortrait,
+  onRotateScreen,
+  onClose
+}) {
+  const fa = withBoost(a, b, boost);
+  const fb = withBoost(b, a, boost);
+  const [hp, setHp] = useState([fa.hp, fb.hp]);
+  const [turn, setTurn] = useState(
+    () => fa.spd === fb.spd ? Math.random() < 0.5 ? 0 : 1 : fa.spd > fb.spd ? 0 : 1
+  );
+  const [cap, setCap] = useState("ようい… はじめ!");
+  const [gauge, setGauge] = useState([0, 0]);
+  const [winner, setWinner] = useState(null);
+  const [fx, setFx] = useState(null);
+  const [pops, setPops] = useState([]);
+  const popId = useRef(0);
+  const hpRef = useRef(hp);
+  const turnRef = useRef(turn);
+  const overRef = useRef(false);
+  hpRef.current = hp;
+  turnRef.current = turn;
+  const fighters = [fa, fb];
+  const names = [nameA, nameB];
+  function showFx(side, kind) {
+    setFx({ side, kind, id: popId.current++ });
+    setTimeout(() => setFx((f) => f && f.kind === kind && f.side === side ? null : f), 700);
+  }
+  function applyDamage(side, dmg) {
+    const next = hpRef.current.slice();
+    next[1 - side] = Math.max(0, next[1 - side] - dmg);
+    hpRef.current = next;
+    setHp(next);
+    if (next[1 - side] <= 0) {
+      overRef.current = true;
+      setWinner(side);
+      setCap(`${names[side]} の かち!`);
+    }
+  }
+  useEffect(() => {
+    if (showRotate) return;
+    const t = setInterval(() => {
+      if (overRef.current) return;
+      const me = fighters[turnRef.current];
+      const you = fighters[1 - turnRef.current];
+      const side = turnRef.current;
+      const rng = Math.random;
+      const pinch = hpRef.current[side] / me.hp <= 0.35;
+      const isCrit = rng() < Math.min(0.6, me.crit + (pinch ? 0.15 : 0));
+      if (rng() < Math.min(0.15, you.spd / (you.spd + me.spd) * 0.18)) {
+        setCap(`${names[side]} の こうげき… かわされた!`);
+      } else {
+        const base = me.atk * (pinch ? 1.35 : 1);
+        const dmg = Math.max(
+          1,
+          Math.round((base - you.def * 0.5) * (0.7 + rng() * 0.6) * (isCrit ? 1.8 : 1))
+        );
+        applyDamage(side, dmg);
+        setCap(
+          `${names[side]} の こうげき!${isCrit ? " かいしんの いちげき!" : ""} ${dmg} ダメージ`
+        );
+        showFx(1 - side, "hit");
+      }
+      setTurn((x) => 1 - x);
+    }, 1e3);
+    return () => clearInterval(t);
+  }, [showRotate]);
+  function tap(side, e) {
+    if (overRef.current || showRotate) return;
+    let x = 50;
+    let y = 50;
+    try {
+      const r = e.currentTarget.getBoundingClientRect();
+      x = (e.clientX - r.left) / r.width * 100;
+      y = (e.clientY - r.top) / r.height * 100;
+    } catch (err) {
+    }
+    const id = popId.current + 1;
+    popId.current = id;
+    setPops((ps) => ps.slice(-9).concat([{ id, side, x, y }]));
+    setTimeout(() => setPops((ps) => ps.filter((q) => q.id !== id)), 650);
+    setGauge((g) => {
+      const next = g.slice();
+      next[side] = next[side] + 1;
+      if (next[side] >= CHARGE_TAPS) {
+        next[side] = 0;
+        const me = fighters[side];
+        const you = fighters[1 - side];
+        const dmg = Math.max(
+          1,
+          Math.round(me.atk * 1.6 + 6 - you.def * 0.3)
+        );
+        applyDamage(side, dmg);
+        setCap(`⚡ ${names[side]} の ひっさつわざ! ${dmg} ダメージ`);
+        showFx(side, "special");
+      }
+      return next;
+    });
+  }
+  const sideBox = (side) => {
+    const st = fighters[side];
+    const max = st.hp;
+    const cur = hp[side];
+    const g = gauge[side];
+    const ready = g >= CHARGE_TAPS - 1;
+    return /* @__PURE__ */ React.createElement("div", { style: styles.lvSide }, /* @__PURE__ */ React.createElement("div", { style: styles.vsFighterName }, names[side]), /* @__PURE__ */ React.createElement("div", { style: wide ? styles.vsFighterMonWide : styles.vsFighterMon }, /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        className: fx && fx.side === side && fx.kind === "hit" ? side === 0 ? "hurt-left" : "hurt-right" : "idle-bob",
+        style: { display: "inline-flex" }
+      },
+      /* @__PURE__ */ React.createElement(
+        MonsterFace,
+        {
+          stage: { id: st.stageId, ...STAGE_DEFS[st.stageId] },
+          size: wide ? 96 : 70,
+          artStyle,
+          skin: side === 0 ? skinA : skinB
+        }
+      )
+    )), /* @__PURE__ */ React.createElement("div", { style: styles.vsHpTrack }, /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        style: {
+          ...styles.vsHpFill,
+          width: `${Math.max(0, cur / max * 100)}%`,
+          background: cur / max > 0.3 ? "#7ED957" : "#FF6B4A"
+        }
+      }
+    )), /* @__PURE__ */ React.createElement("div", { style: styles.vsHpNum }, cur, " / ", max));
+  };
+  const padBtn = (side) => {
+    const g = gauge[side];
+    const pct2 = Math.round(g / CHARGE_TAPS * 100);
+    const ready = pct2 >= 90;
+    return /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onPointerDown: (e) => tap(side, e),
+        disabled: winner !== null,
+        style: {
+          ...styles.lvPad,
+          ...side === 0 ? styles.lvPadA : styles.lvPadB,
+          opacity: winner !== null ? 0.4 : 1
+        }
+      },
+      /* @__PURE__ */ React.createElement("span", { style: styles.lvPadName }, names[side]),
+      /* @__PURE__ */ React.createElement("span", { style: styles.lvPadHint }, ready ? "⚡ もうすぐ ひっさつ!" : "れんだ!"),
+      /* @__PURE__ */ React.createElement("span", { style: styles.lvPadTrack }, /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          style: {
+            ...styles.lvPadFill,
+            width: `${pct2}%`,
+            background: side === 0 ? "#4AC9FF" : "#FF8A4A"
+          }
+        }
+      )),
+      pops.filter((q) => q.side === side).map((q) => /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          key: q.id,
+          className: "cheer-pop",
+          style: { ...styles.cheerPop, left: `${q.x}%`, top: `${q.y}%`, fontSize: 20 }
+        },
+        "💥"
+      ))
+    );
+  };
+  if (showRotate) {
+    return /* @__PURE__ */ React.createElement("div", { style: styles.dashOverlay }, /* @__PURE__ */ React.createElement("style", null, VS_CSS), /* @__PURE__ */ React.createElement("div", { style: styles.dashHeader }, /* @__PURE__ */ React.createElement("span", { style: styles.dashTitle }, "🤝 ふたりで たいせん"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, style: styles.drawClose }, "✕ とじる")), /* @__PURE__ */ React.createElement("div", { style: styles.rotateBox }, /* @__PURE__ */ React.createElement("div", { className: "rotate-icon", style: styles.rotateIcon }, "📱"), /* @__PURE__ */ React.createElement("div", { style: styles.rotateTitle }, "たんまつを よこに してね"), /* @__PURE__ */ React.createElement("div", { style: styles.rotateSub }, "よこに おいて、ひだりと みぎから", /* @__PURE__ */ React.createElement("br", null), "ふたりで ボタンを おしあうよ"), /* @__PURE__ */ React.createElement("button", { onClick: onRotateScreen, style: styles.rotateGo }, "🔄 がめんを まわす"), /* @__PURE__ */ React.createElement("div", { style: styles.rotateTiny }, "たんまつの かいてんロックが オンの ときは こっち"), /* @__PURE__ */ React.createElement("button", { onClick: onStayPortrait, style: styles.rotateSkip }, "たてのまま あそぶ")));
+  }
+  return /* @__PURE__ */ React.createElement("div", { style: styles.dashOverlay }, /* @__PURE__ */ React.createElement("style", null, VS_CSS), /* @__PURE__ */ React.createElement("div", { style: wide ? styles.vsHeadWide : styles.dashHeader }, /* @__PURE__ */ React.createElement("span", { style: styles.dashTitle }, "🤝 ふたりで たいせん"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, style: styles.drawClose }, "✕ とじる")), /* @__PURE__ */ React.createElement("div", { style: styles.lvArena }, /* @__PURE__ */ React.createElement("div", { style: wide ? styles.vsTopRowWide : styles.vsTopRow }, sideBox(0), /* @__PURE__ */ React.createElement("div", { style: styles.vsMiddle }, "VS"), sideBox(1)), /* @__PURE__ */ React.createElement("div", { style: styles.vsCaption }, cap), fx && fx.kind === "special" && /* @__PURE__ */ React.createElement("div", { className: "banner-pop", style: styles.cheerMaxBanner }, "⚡ ひっさつわざ!"), winner !== null && /* @__PURE__ */ React.createElement("div", { style: { ...styles.vsResultBox, ...styles.vsResultWide } }, /* @__PURE__ */ React.createElement("div", { style: styles.vsResultTitle }, "🏆 ", names[winner], " の かち!"), /* @__PURE__ */ React.createElement("div", { style: styles.vsResultSub }, "れんだ おつかれさま!"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, style: styles.evoBtn }, "もどる"))), /* @__PURE__ */ React.createElement("div", { style: styles.lvPadRow }, padBtn(0), padBtn(1)));
+}
 function QrScanner({ onFound, onClose }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -3863,6 +4080,7 @@ function VsBattleView({
   wide,
   showRotate,
   onStayPortrait,
+  onRotateScreen,
   onSkip,
   onClose
 }) {
@@ -3971,7 +4189,7 @@ function VsBattleView({
     }
   )), /* @__PURE__ */ React.createElement("div", { style: styles.vsHpNum }, hp, " / ", max));
   if (showRotate) {
-    return /* @__PURE__ */ React.createElement("div", { style: styles.dashOverlay }, /* @__PURE__ */ React.createElement("style", null, VS_CSS), /* @__PURE__ */ React.createElement("div", { style: styles.dashHeader }, /* @__PURE__ */ React.createElement("span", { style: styles.dashTitle }, "⚔️ しあい"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, style: styles.drawClose }, "✕ とじる")), /* @__PURE__ */ React.createElement("div", { style: styles.rotateBox }, /* @__PURE__ */ React.createElement("div", { className: "rotate-icon", style: styles.rotateIcon }, "📱"), /* @__PURE__ */ React.createElement("div", { style: styles.rotateTitle }, "たんまつを よこに してね"), /* @__PURE__ */ React.createElement("div", { style: styles.rotateSub }, "よこむきの ほうが モンスターが 大きく みえて、", /* @__PURE__ */ React.createElement("br", null), "おうえんも しやすいよ"), /* @__PURE__ */ React.createElement("button", { onClick: onStayPortrait, style: styles.rotateSkip }, "たてのまま みる")));
+    return /* @__PURE__ */ React.createElement("div", { style: styles.dashOverlay }, /* @__PURE__ */ React.createElement("style", null, VS_CSS), /* @__PURE__ */ React.createElement("div", { style: styles.dashHeader }, /* @__PURE__ */ React.createElement("span", { style: styles.dashTitle }, "⚔️ しあい"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, style: styles.drawClose }, "✕ とじる")), /* @__PURE__ */ React.createElement("div", { style: styles.rotateBox }, /* @__PURE__ */ React.createElement("div", { className: "rotate-icon", style: styles.rotateIcon }, "📱"), /* @__PURE__ */ React.createElement("div", { style: styles.rotateTitle }, "たんまつを よこに してね"), /* @__PURE__ */ React.createElement("div", { style: styles.rotateSub }, "よこむきの ほうが モンスターが 大きく みえて、", /* @__PURE__ */ React.createElement("br", null), "おうえんも しやすいよ"), /* @__PURE__ */ React.createElement("button", { onClick: onRotateScreen, style: styles.rotateGo }, "🔄 がめんを まわす"), /* @__PURE__ */ React.createElement("div", { style: styles.rotateTiny }, "たんまつの かいてんロックが オンの ときは こっち"), /* @__PURE__ */ React.createElement("button", { onClick: onStayPortrait, style: styles.rotateSkip }, "たてのまま みる")));
   }
   return /* @__PURE__ */ React.createElement("div", { style: styles.dashOverlay }, /* @__PURE__ */ React.createElement("style", null, VS_CSS), /* @__PURE__ */ React.createElement("div", { style: wide ? styles.vsHeadWide : styles.dashHeader }, /* @__PURE__ */ React.createElement("span", { style: styles.dashTitle }, "⚔️ しあい"), done ? /* @__PURE__ */ React.createElement("button", { onClick: onClose, style: styles.drawClose }, "✕ とじる") : /* @__PURE__ */ React.createElement("button", { onClick: onSkip, style: styles.drawClose }, "⏩ さいごまで")), /* @__PURE__ */ React.createElement(
     "div",
@@ -4206,10 +4424,12 @@ function MathMonsterBattle() {
     () => typeof window === "undefined" ? true : window.innerWidth > window.innerHeight
   );
   const [vsStayPortrait, setVsStayPortrait] = useState(false);
+  const [vsFakeRotate, setVsFakeRotate] = useState(false);
   const [vsRecord, setVsRecord] = useState({ win: 0, lose: 0 });
   const [vsPending, setVsPending] = useState(null);
   const [vsShare, setVsShare] = useState("qr");
   const [kanaOpen, setKanaOpen] = useState(false);
+  const [localVs, setLocalVs] = useState(null);
   const [chScore, setChScore] = useState(0);
   const [chLeft, setChLeft] = useState(TIME_ATTACK_SEC);
   const [chResult, setChResult] = useState(null);
@@ -5041,7 +5261,11 @@ function MathMonsterBattle() {
     return () => clearInterval(chTickRef.current);
   }, [challenge, screen]);
   useEffect(() => {
-    const onRz = () => setIsLandscape(window.innerWidth > window.innerHeight);
+    const onRz = () => {
+      const land = window.innerWidth > window.innerHeight;
+      setIsLandscape(land);
+      if (land) setVsFakeRotate(false);
+    };
     window.addEventListener("resize", onRz);
     window.addEventListener("orientationchange", onRz);
     return () => {
@@ -5049,7 +5273,8 @@ function MathMonsterBattle() {
       window.removeEventListener("orientationchange", onRz);
     };
   }, []);
-  const vsShowRotate = !isLandscape && !vsStayPortrait;
+  const vsShowRotate = !isLandscape && !vsStayPortrait && !vsFakeRotate;
+  const vsWide = isLandscape || vsFakeRotate;
   useEffect(() => {
     if (!vsBattle) return;
     if (vsShowRotate) return;
@@ -5418,6 +5643,7 @@ function MathMonsterBattle() {
     }
   }
   function startVs(input) {
+    wantLandscape();
     let code = String(input || "").trim();
     const m = code.match(/[?&]vs=([^&\s]+)/);
     if (m) code = m[1];
@@ -5434,7 +5660,51 @@ function MathMonsterBattle() {
     setVsStep(0);
     setVsMsg("");
   }
+  function wantLandscape() {
+    setVsStayPortrait(false);
+    setVsFakeRotate(false);
+    try {
+      Promise.resolve(askLandscape()).catch(() => {
+      });
+    } catch (e) {
+    }
+  }
+  function startLocalVs(pid) {
+    wantLandscape();
+    try {
+      let opp = null;
+      let oppName = "もう ひとりの じぶん";
+      let oppSkin = null;
+      if (pid) {
+        const raw = localStorage.getItem(saveKeyFor(pid));
+        if (!raw) {
+          setVsMsg("その人の きろくが まだ ないよ");
+          return;
+        }
+        const data = JSON.parse(raw);
+        opp = battleStats(data);
+        const prof = profiles.find((x) => x.id === pid);
+        oppName = prof ? prof.name : "あいて";
+        oppSkin = opp.skin || null;
+      } else {
+        opp = { ...myCardStats };
+        oppSkin = myCardStats.skin || null;
+      }
+      setLocalVs({
+        a: myCardStats,
+        b: opp,
+        nameA: activeProfile.name,
+        nameB: oppName,
+        skinA: myCardStats.skin || null,
+        skinB: oppSkin
+      });
+      setVsMsg("");
+    } catch (e) {
+      setVsMsg("きろくを よみこめなかったよ");
+    }
+  }
   function startVsSelf() {
+    wantLandscape();
     const opp = { ...myCardStats, name: myCardStats.name };
     const result = simulateBattle(myCardStats, opp, seedFrom(myCode + "|self" + Date.now()), vsBoost);
     setVsBattle({ result, me: myCardStats, opp, myName: activeProfile.name, oppName: "もう ひとりの じぶん", self: true });
@@ -5442,6 +5712,7 @@ function MathMonsterBattle() {
     setVsMsg("");
   }
   function startVsProfile(pid) {
+    wantLandscape();
     try {
       const raw = localStorage.getItem(saveKeyFor(pid));
       if (!raw) {
@@ -5896,7 +6167,16 @@ function MathMonsterBattle() {
           startVs(text);
         }
       }
-    ), profiles.filter((x) => x.id !== activeId).length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.dashSection }, "おなじ タブレットの 人と"), /* @__PURE__ */ React.createElement("div", { style: styles.vsProfileRow }, profiles.filter((x) => x.id !== activeId).map((pr) => /* @__PURE__ */ React.createElement("button", { key: pr.id, onClick: () => startVsProfile(pr.id), style: styles.vsProfileBtn }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 20 } }, pr.icon), /* @__PURE__ */ React.createElement("span", { style: styles.vsProfileName }, pr.name))))), /* @__PURE__ */ React.createElement("div", { style: styles.dashSection }, "れんしゅう"), /* @__PURE__ */ React.createElement("button", { onClick: startVsSelf, style: styles.vsSelfBtn }, "🪞 もう ひとりの じぶんと たたかう"), /* @__PURE__ */ React.createElement("div", { style: styles.dashSection }, "ルール"), /* @__PURE__ */ React.createElement("div", { style: styles.vsRuleRow }, [
+    ), profiles.filter((x) => x.id !== activeId).length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.dashSection }, "おなじ タブレットの 人と"), /* @__PURE__ */ React.createElement("div", { style: styles.vsProfileRow }, profiles.filter((x) => x.id !== activeId).map((pr) => /* @__PURE__ */ React.createElement("button", { key: pr.id, onClick: () => startVsProfile(pr.id), style: styles.vsProfileBtn }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 20 } }, pr.icon), /* @__PURE__ */ React.createElement("span", { style: styles.vsProfileName }, pr.name))))), /* @__PURE__ */ React.createElement("div", { style: styles.dashSection }, "🤝 ふたりで おしあう(おなじ タブレット)"), /* @__PURE__ */ React.createElement("div", { style: styles.dashNote }, "よこに おいて、ひだりと みぎから ボタンを れんだ!", /* @__PURE__ */ React.createElement("br", null), "ためると ひっさつわざが でるよ"), /* @__PURE__ */ React.createElement("div", { style: styles.vsProfileRow }, profiles.filter((x) => x.id !== activeId).map((pr) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: pr.id,
+        onClick: () => startLocalVs(pr.id),
+        style: styles.vsProfileBtn
+      },
+      /* @__PURE__ */ React.createElement("span", { style: { fontSize: 20 } }, pr.icon),
+      /* @__PURE__ */ React.createElement("span", { style: styles.vsProfileName }, pr.name, "と")
+    )), /* @__PURE__ */ React.createElement("button", { onClick: () => startLocalVs(null), style: styles.vsProfileBtn }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 20 } }, "🪞"), /* @__PURE__ */ React.createElement("span", { style: styles.vsProfileName }, "おなじ つよさと"))), /* @__PURE__ */ React.createElement("div", { style: styles.dashSection }, "れんしゅう"), /* @__PURE__ */ React.createElement("button", { onClick: startVsSelf, style: styles.vsSelfBtn }, "🪞 もう ひとりの じぶんと たたかう(かんせん)"), /* @__PURE__ */ React.createElement("div", { style: styles.dashSection }, "ルール"), /* @__PURE__ */ React.createElement("div", { style: styles.vsRuleRow }, [
       { on: true, label: "がんばりブースト あり", desc: "つよさの さを すこし うめる" },
       { on: false, label: "ガチンコ", desc: "そのままの つよさで たたかう" }
     ].map((r) => /* @__PURE__ */ React.createElement(
@@ -5911,23 +6191,59 @@ function MathMonsterBattle() {
       },
       /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, fontWeight: 700 } }, r.label),
       /* @__PURE__ */ React.createElement("div", { style: { fontSize: 10, color: "#8A85B8" } }, r.desc)
-    ))), /* @__PURE__ */ React.createElement("div", { style: styles.dashNote }, "ブーストを つけると、つよさの さが おおきくても 3かいに 1かいくらいは かてるよ。 それでも やりこんだ ほうが ゆうり。", /* @__PURE__ */ React.createElement("br", null), "せいせき: ", vsRecord.win, "しょう ", vsRecord.lose, "はい"))), vsBattle && /* @__PURE__ */ React.createElement(
+    ))), /* @__PURE__ */ React.createElement("div", { style: styles.dashNote }, "ブーストを つけると、つよさの さが おおきくても 3かいに 1かいくらいは かてるよ。 それでも やりこんだ ほうが ゆうり。", /* @__PURE__ */ React.createElement("br", null), "せいせき: ", vsRecord.win, "しょう ", vsRecord.lose, "はい"))), (localVs || vsBattle) && vsFakeRotate && /* @__PURE__ */ React.createElement("style", null, `
+            .fake-rot {
+              position: fixed;
+              top: 0;
+              left: 0;
+              width: 100vh;
+              height: 100vw;
+              transform-origin: top left;
+              transform: rotate(90deg) translateY(-100%);
+              overflow: hidden;
+              z-index: 60;
+            }
+          `), localVs && /* @__PURE__ */ React.createElement("div", { className: vsFakeRotate ? "fake-rot" : void 0 }, /* @__PURE__ */ React.createElement(
+      LocalVsView,
+      {
+        a: localVs.a,
+        b: localVs.b,
+        nameA: localVs.nameA,
+        nameB: localVs.nameB,
+        artStyle,
+        skinA: localVs.skinA,
+        skinB: localVs.skinB,
+        boost: vsBoost,
+        wide: vsWide,
+        showRotate: vsShowRotate,
+        onStayPortrait: () => setVsStayPortrait(true),
+        onRotateScreen: () => setVsFakeRotate(true),
+        onClose: () => {
+          releaseLandscape();
+          setVsFakeRotate(false);
+          setLocalVs(null);
+        }
+      }
+    )), vsBattle && /* @__PURE__ */ React.createElement("div", { className: vsFakeRotate ? "fake-rot" : void 0 }, /* @__PURE__ */ React.createElement(
       VsBattleView,
       {
         battle: vsBattle,
         step: vsStep,
-        wide: isLandscape,
+        wide: vsWide,
         showRotate: vsShowRotate,
         onStayPortrait: () => setVsStayPortrait(true),
+        onRotateScreen: () => setVsFakeRotate(true),
         artStyle,
         skinMonster,
         onSkip: () => setVsStep(vsBattle.result.log.length - 1),
         onClose: () => {
+          releaseLandscape();
+          setVsFakeRotate(false);
           setVsBattle(null);
           setVsStep(0);
         }
       }
-    ), profileOpen && /* @__PURE__ */ React.createElement("div", { style: styles.evoOverlay }, /* @__PURE__ */ React.createElement("div", { style: styles.evoCaption }, "だれが あそぶ?"), /* @__PURE__ */ React.createElement("div", { style: styles.profileList }, profiles.map((p) => /* @__PURE__ */ React.createElement(
+    )), profileOpen && /* @__PURE__ */ React.createElement("div", { style: styles.evoOverlay }, /* @__PURE__ */ React.createElement("div", { style: styles.evoCaption }, "だれが あそぶ?"), /* @__PURE__ */ React.createElement("div", { style: styles.profileList }, profiles.map((p) => /* @__PURE__ */ React.createElement(
       "div",
       {
         key: p.id,
@@ -7636,6 +7952,75 @@ const styles = {
     WebkitUserSelect: "text",
     userSelect: "text"
   },
+  lvArena: {
+    position: "relative",
+    flex: 1,
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    gap: 6,
+    padding: "2px calc(12px + env(safe-area-inset-right)) 4px calc(12px + env(safe-area-inset-left))",
+    boxSizing: "border-box",
+    overflow: "hidden"
+  },
+  lvSide: {
+    flex: 1,
+    maxWidth: 260,
+    textAlign: "center"
+  },
+  lvPadRow: {
+    display: "flex",
+    gap: 8,
+    padding: "0 calc(10px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left))",
+    flexShrink: 0
+  },
+  lvPad: {
+    position: "relative",
+    flex: 1,
+    minHeight: 96,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    border: "none",
+    borderRadius: 18,
+    cursor: "pointer",
+    overflow: "hidden",
+    touchAction: "manipulation"
+  },
+  lvPadA: {
+    background: "linear-gradient(180deg,#2E6FA8,#1C4A74)",
+    boxShadow: "0 5px 0 #13324F"
+  },
+  lvPadB: {
+    background: "linear-gradient(180deg,#A85A2E,#74401C)",
+    boxShadow: "0 5px 0 #4F2A13"
+  },
+  lvPadName: {
+    fontSize: 15,
+    fontWeight: 800,
+    color: "#FFFFFF"
+  },
+  lvPadHint: {
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#FFE9B8"
+  },
+  lvPadTrack: {
+    width: "76%",
+    height: 9,
+    borderRadius: 6,
+    background: "rgba(0,0,0,0.35)",
+    overflow: "hidden"
+  },
+  lvPadFill: {
+    display: "block",
+    height: "100%",
+    borderRadius: 6,
+    transition: "width 0.08s linear"
+  },
   photoBtn: {
     width: "100%",
     padding: "13px 10px",
@@ -8027,6 +8412,21 @@ const styles = {
     fontSize: 13,
     color: "#8A85B8",
     lineHeight: 1.7
+  },
+  rotateGo: {
+    marginTop: 6,
+    padding: "13px 26px",
+    fontSize: 16,
+    fontWeight: 800,
+    color: "#2A1A00",
+    background: "linear-gradient(180deg,#FFD23F,#FF8A4A)",
+    border: "none",
+    borderRadius: 18,
+    cursor: "pointer"
+  },
+  rotateTiny: {
+    fontSize: 11,
+    color: "#6F6A9C"
   },
   rotateSkip: {
     marginTop: 8,
