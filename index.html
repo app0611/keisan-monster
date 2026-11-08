@@ -38,7 +38,7 @@
 <script>
 // ---- じどう こうしん ----
 // じぶんの ばんごう
-var APP_VERSION = "20261027-195541";
+var APP_VERSION = "20261108-201307";
 
 // サーバーに「いまの さいしんは なにか」を きく。
 // ふるい ないようが のこっていても、この といあわせは かならず
@@ -172,13 +172,22 @@ const SPECIAL_BRANCH = {
   desc: "まもりに とくかした いばらの みち",
   perks: ["さいだいHPが とても たかい", "うけるダメージ -4", "こうげき -1(たおすのが たいへん)", "もらえるポイント 1.4ばい"]
 };
+const ONI_BRANCH = {
+  id: "oni",
+  label: "おにの みち",
+  emoji: "👹",
+  desc: "つのを もつ おにの みち",
+  perks: ["こうげき +2 の アタッカー", "さいだいHPは ひかえめ", "たまごから すぐ えらべる"]
+};
 const BRANCH_BONUS = {
   surikara: { atk: 1, def: 1, timeMult: 1, pointMult: 1 },
   gekkopika: { atk: 0, def: 0, timeMult: 1.25, pointMult: 1.2 },
   // まもりは かたいが、こうげきが とても よわい
   special: { atk: -1, def: 4, timeMult: 1, pointMult: 1.4 },
   // ポイントに とくかした みち
-  iris: { atk: 0, def: 0, timeMult: 1, pointMult: 2 }
+  iris: { atk: 0, def: 0, timeMult: 1, pointMult: 2 },
+  // こうげきに とくかした みち(HPは ひかえめ)
+  oni: { atk: 2, def: 0, timeMult: 1, pointMult: 1 }
 };
 const STAGE_DEFS = {
   egg: { name: "たまご", emoji: "🥚", threshold: 0, maxHp: 20 },
@@ -200,14 +209,20 @@ const STAGE_DEFS = {
   iris: { name: "イリス", emoji: "💧", threshold: 10, maxHp: 40 },
   cales: { name: "カレス", emoji: "🍀", threshold: 45, maxHp: 62 },
   sesuri: { name: "セスリ", emoji: "🌟", threshold: 170, maxHp: 95 },
-  biria: { name: "ビリア", emoji: "🔹", threshold: 430, maxHp: 140 }
+  biria: { name: "ビリア", emoji: "🔹", threshold: 430, maxHp: 140 },
+  // おにの みち
+  mizuoni: { name: "みずのおに", emoji: "💧", threshold: 10, maxHp: 45 },
+  bakudanoni: { name: "ばくだんおに", emoji: "💣", threshold: 50, maxHp: 70 },
+  kaminarioni: { name: "かみなりおに", emoji: "⚡", threshold: 180, maxHp: 105 },
+  happaoni: { name: "はっぱおに", emoji: "🍃", threshold: 450, maxHp: 150 }
 };
 const BRANCH_PATHS = {
   surikara: ["egg", "nokosuko", "surikara", "mameizing", "tsubasanomame"],
   gekkopika: ["egg", "nokosuko", "gekkopika", "suirin", "nanoshi"],
   // たまごから すぐ わかれる とくべつルート
   special: ["egg", "karasui", "hinrin", "surito", "hayata"],
-  iris: ["egg", "iris", "cales", "sesuri", "biria"]
+  iris: ["egg", "iris", "cales", "sesuri", "biria"],
+  oni: ["egg", "mizuoni", "bakudanoni", "kaminarioni", "happaoni"]
 };
 function stagePathFor(branch) {
   const ids = branch ? BRANCH_PATHS[branch] : ["egg", "nokosuko"];
@@ -222,7 +237,10 @@ const ENEMIES = [
   { name: "かまどこ", emoji: "🍥", hp: 32, atk: 7, color: "#F09AA8", art: "kamadoko" },
   { name: "スル", emoji: "🪰", hp: 20, atk: 5, color: "#6E8FE0", art: "suru" },
   { name: "ヒリ", emoji: "🐝", hp: 30, atk: 6, color: "#F2D64B", art: "hiri" },
-  { name: "カエ", emoji: "🦟", hp: 38, atk: 8, color: "#D9424A", art: "kae" }
+  { name: "カエ", emoji: "🦟", hp: 38, atk: 8, color: "#D9424A", art: "kae" },
+  { name: "ニンジンライド", emoji: "🥕", hp: 26, atk: 6, color: "#F0A04A", art: "ninjinride" },
+  { name: "ニンジンハカセ", emoji: "🥼", hp: 34, atk: 7, color: "#E8913A", art: "ninjinhakase" },
+  { name: "ニンジンニンジャ", emoji: "🥷", hp: 44, atk: 9, color: "#D4832F", art: "ninjinninja" }
 ];
 const BOSSES = [
   { name: "マイナスのサーファー", emoji: "🏄", hp: 46, atk: 8, color: "#7FB6E8", art: "minus" },
@@ -547,7 +565,7 @@ function runMatch(myStats, myCode, oppStats, oppCode, boostOn) {
   };
 }
 const CARD_STAGES = Object.keys(STAGE_DEFS);
-const CARD_BRANCHES = ["", "surikara", "gekkopika", "special", "iris"];
+const CARD_BRANCHES = ["", "surikara", "gekkopika", "special", "iris", "oni"];
 function encodeCard(st, playerName) {
   const nameBytes = new TextEncoder().encode(String(playerName || "プレイヤー").slice(0, 8));
   const n = Math.min(nameBytes.length, 30);
@@ -3530,6 +3548,31 @@ function MaouKakeruArt({ size }) {
     }
   ), /* @__PURE__ */ React.createElement("path", { d: "M40 24 Q44 26 46 24", stroke: "#B8B0A4", strokeWidth: "1.6", fill: "none", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M36 13 L40 3 L45 11 L50 1 L55 11 L60 3 L64 13 Z", fill: "#F2CE3C", stroke: "#2B2B2B", strokeWidth: "2", strokeLinejoin: "round" }), /* @__PURE__ */ React.createElement("circle", { cx: "50", cy: "7", r: "1.8", fill: "#C9364A" }));
 }
+function OniLine({ size, color, dark, item }) {
+  const hand = (x) => x;
+  return /* @__PURE__ */ React.createElement("svg", { width: size, height: size, viewBox: "0 0 100 100" }, /* @__PURE__ */ React.createElement("path", { d: "M40 30 L27 5 L47 23 Z", fill: color, stroke: color, strokeWidth: "2.2", strokeLinejoin: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M60 30 L73 5 L53 23 Z", fill: color, stroke: color, strokeWidth: "2.2", strokeLinejoin: "round" }), /* @__PURE__ */ React.createElement("ellipse", { cx: "50", cy: "39", rx: "17", ry: "15", fill: color, stroke: color, strokeWidth: "2" }), /* @__PURE__ */ React.createElement("ellipse", { cx: "44", cy: "36", rx: "3.4", ry: "4.8", fill: dark }), /* @__PURE__ */ React.createElement("ellipse", { cx: "56", cy: "36", rx: "3.4", ry: "4.8", fill: dark }), /* @__PURE__ */ React.createElement("path", { d: "M44 45 Q50 50 56 45", stroke: dark, strokeWidth: "2", fill: "none", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M36 51 Q23 57 19 70", fill: "none", stroke: color, strokeWidth: "3.2", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M64 51 Q77 57 81 70", fill: "none", stroke: color, strokeWidth: "3.2", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M44 53 Q39 72 42 91", fill: "none", stroke: color, strokeWidth: "3.2", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M56 53 Q61 72 58 91", fill: "none", stroke: color, strokeWidth: "3.2", strokeLinecap: "round" }), item === "water" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("path", { d: "M81 70 L88 60", stroke: color, strokeWidth: "2.8", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M89 44 q11 14 0 20 q-11 -6 0 -20 Z", fill: "#4A9FE0", stroke: "#2E6FA8", strokeWidth: "1.6", strokeLinejoin: "round" })), item === "bomb" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("path", { d: "M19 70 L13 59", stroke: color, strokeWidth: "2.8", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("circle", { cx: "11", cy: "54", r: "6.4", fill: "#3A3A3A" }), /* @__PURE__ */ React.createElement("path", { d: "M81 70 L87 59", stroke: color, strokeWidth: "2.8", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("circle", { cx: "89", cy: "54", r: "6.4", fill: "#3A3A3A" })), item === "thunder" && /* @__PURE__ */ React.createElement(
+    "path",
+    {
+      d: "M88 46 L76 66 L84 66 L79 86 L95 62 L87 62 Z",
+      fill: "#F2C53C",
+      stroke: "#C9922A",
+      strokeWidth: "1.5",
+      strokeLinejoin: "round"
+    }
+  ), item === "leaf" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("path", { d: "M87 48 L87 80", stroke: "#4A8F3C", strokeWidth: "2", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M87 46 q11 12 0 26 q-11 -14 0 -26 Z", fill: "#9ED94A", stroke: "#4A8F3C", strokeWidth: "1.6", strokeLinejoin: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M87 50 L87 68", stroke: "#4A8F3C", strokeWidth: "1.2", strokeLinecap: "round" })));
+}
+function MizuOniArt({ size }) {
+  return /* @__PURE__ */ React.createElement(OniLine, { size, color: "#4A7FD9", dark: "#1E2A4A", item: "water" });
+}
+function BakudanOniArt({ size }) {
+  return /* @__PURE__ */ React.createElement(OniLine, { size, color: "#E8657F", dark: "#5A1E2A", item: "bomb" });
+}
+function KaminariOniArt({ size }) {
+  return /* @__PURE__ */ React.createElement(OniLine, { size, color: "#F2D64B", dark: "#5A4A14", item: "thunder" });
+}
+function HappaOniArt({ size }) {
+  return /* @__PURE__ */ React.createElement(OniLine, { size, color: "#A8D44A", dark: "#3A4A14", item: "leaf" });
+}
 const STAGE_ART = {
   nokosuko: NokosukoArt,
   surikara: SurikaraArt,
@@ -3545,8 +3588,33 @@ const STAGE_ART = {
   iris: IrisArt,
   cales: CalesArt,
   sesuri: SesuriArt,
-  biria: BiriaArt
+  biria: BiriaArt,
+  mizuoni: MizuOniArt,
+  bakudanoni: BakudanOniArt,
+  kaminarioni: KaminariOniArt,
+  happaoni: HappaOniArt
 };
+function CarrotBody({ eyes = 2, smile = true }) {
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("path", { d: "M42 38 L40 19 L50 27 L60 17 L58 38 Z", fill: "#8FD44A", stroke: "#6AA832", strokeWidth: "1.6", strokeLinejoin: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M39 37 Q50 33 61 37 L53 82 Q50 88 47 82 Z", fill: "#F0A04A", stroke: "#D4832F", strokeWidth: "1.8", strokeLinejoin: "round" }), eyes === 2 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("ellipse", { cx: "45.5", cy: "47", rx: "2.7", ry: "4", fill: "#2B2B2B" }), /* @__PURE__ */ React.createElement("ellipse", { cx: "54.5", cy: "47", rx: "2.7", ry: "4", fill: "#2B2B2B" })), eyes === 1 && /* @__PURE__ */ React.createElement("ellipse", { cx: "50", cy: "50", rx: "3.6", ry: "5.4", fill: "#4A3A1A", transform: "rotate(20 50 50)" }), smile && /* @__PURE__ */ React.createElement("path", { d: "M45 56 Q50 61 55 56", stroke: "#C0392B", strokeWidth: "1.9", fill: "none", strokeLinecap: "round" }));
+}
+function NinjinRideArt({ size }) {
+  return /* @__PURE__ */ React.createElement("svg", { width: size, height: size, viewBox: "0 0 100 100" }, /* @__PURE__ */ React.createElement("path", { d: "M64 44 L88 42", stroke: "#F0A04A", strokeWidth: "2.6", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M64 53 L92 51", stroke: "#F0A04A", strokeWidth: "2.6", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M64 62 L88 61", stroke: "#F0A04A", strokeWidth: "2.6", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M62 71 L82 70", stroke: "#F0A04A", strokeWidth: "2.6", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement(CarrotBody, { eyes: 1, smile: false }));
+}
+function NinjinHakaseArt({ size }) {
+  return /* @__PURE__ */ React.createElement("svg", { width: size, height: size, viewBox: "0 0 100 100" }, /* @__PURE__ */ React.createElement("path", { d: "M46 74 L41 86", stroke: "#6B4FD9", strokeWidth: "5", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M54 74 L59 86", stroke: "#6B4FD9", strokeWidth: "5", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("ellipse", { cx: "38", cy: "89", rx: "7", ry: "4", fill: "#F0A04A", stroke: "#D4832F", strokeWidth: "1.2" }), /* @__PURE__ */ React.createElement("ellipse", { cx: "62", cy: "89", rx: "7", ry: "4", fill: "#F0A04A", stroke: "#D4832F", strokeWidth: "1.2" }), /* @__PURE__ */ React.createElement("path", { d: "M41 52 L14 44", stroke: "#2B2B2B", strokeWidth: "6.5", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M59 52 L86 44", stroke: "#2B2B2B", strokeWidth: "6.5", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("ellipse", { cx: "11", cy: "43", rx: "6", ry: "5", fill: "#F0A04A", stroke: "#D4832F", strokeWidth: "1.2" }), /* @__PURE__ */ React.createElement("ellipse", { cx: "89", cy: "43", rx: "6", ry: "5", fill: "#F0A04A", stroke: "#D4832F", strokeWidth: "1.2" }), /* @__PURE__ */ React.createElement(CarrotBody, null), /* @__PURE__ */ React.createElement("path", { d: "M41 42 Q38 58 42 72", stroke: "#2B2B2B", strokeWidth: "5", fill: "none", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M59 42 Q62 58 58 72", stroke: "#2B2B2B", strokeWidth: "5", fill: "none", strokeLinecap: "round" }));
+}
+function NinjinNinjaArt({ size }) {
+  return /* @__PURE__ */ React.createElement("svg", { width: size, height: size, viewBox: "0 0 100 100" }, /* @__PURE__ */ React.createElement("path", { d: "M41 52 Q26 54 23 68", fill: "none", stroke: "#D4832F", strokeWidth: "2.2", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M59 52 Q74 54 77 68", fill: "none", stroke: "#D4832F", strokeWidth: "2.2", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M46 76 Q40 84 38 92", fill: "none", stroke: "#D4832F", strokeWidth: "2.2", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("path", { d: "M54 76 Q60 84 62 92", fill: "none", stroke: "#D4832F", strokeWidth: "2.2", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement(CarrotBody, null), /* @__PURE__ */ React.createElement(
+    "path",
+    {
+      d: "M79 20 L85 33 L98 39 L85 45 L79 58 L73 45 L60 39 L73 33 Z",
+      fill: "#3A3A3A",
+      stroke: "#1E1E1E",
+      strokeWidth: "1.4",
+      strokeLinejoin: "round"
+    }
+  ), /* @__PURE__ */ React.createElement("circle", { cx: "79", cy: "39", r: "2.6", fill: "#F5F3FF" }));
+}
 const ENEMY_ART = {
   mili: MilimiliArt,
   cement: CementArt,
@@ -3559,7 +3627,10 @@ const ENEMY_ART = {
   suru: SuruArt,
   hiri: HiriArt,
   kae: KaeArt,
-  waruniki: WarunikiArt
+  waruniki: WarunikiArt,
+  ninjinride: NinjinRideArt,
+  ninjinhakase: NinjinHakaseArt,
+  ninjinninja: NinjinNinjaArt
 };
 function EnemyFace({ enemy, size }) {
   if (enemy && enemy.myImage) {
@@ -4516,7 +4587,9 @@ function MathMonsterBattle() {
   };
   const thresholdFor = (st) => Math.ceil(st.threshold * stats.thresholdMult);
   const stagePath = stagePathFor(branch);
+  const eggChoicePending = !branch && !eggChoiceDone;
   const stageIndex = (() => {
+    if (eggChoicePending) return 0;
     let idx = 0;
     stagePath.forEach((s, i) => {
       if (exp >= thresholdFor(s)) idx = i;
@@ -4583,7 +4656,8 @@ function MathMonsterBattle() {
           if (data.savedAt) setSavedAt(data.savedAt);
           setEnemyHp((_g2 = data.enemyHp) != null ? _g2 : enemyForStage(sn).hp);
           if (data.branch) setBranch(data.branch);
-          if (data.eggChoiceDone) setEggChoiceDone(true);
+          const passedEgg = (data.exp || 0) >= STAGE_DEFS.nokosuko.threshold;
+          if (data.eggChoiceDone || data.branch || passedEgg) setEggChoiceDone(true);
           const savedPath = stagePathFor((_h2 = data.branch) != null ? _h2 : null);
           const savedExp = typeof data.exp === "number" ? data.exp : (_i2 = data.correctCount) != null ? _i2 : 0;
           let stIdx = 0;
@@ -5343,14 +5417,14 @@ function MathMonsterBattle() {
   }, [itemToast]);
   useEffect(() => {
     if (!loaded || screen !== "game") return;
-    if (branch || eggChoiceDone || !specialUnlocked && !irisUnlocked) return;
+    if (branch || eggChoiceDone) return;
     const firstNext = Math.ceil(STAGE_DEFS.nokosuko.threshold * stats.thresholdMult);
     if (exp >= firstNext && !eggPrompt && !evolveEvent) {
       setEggPrompt(true);
     }
   }, [exp, branch, eggChoiceDone, specialUnlocked, loaded, screen]);
   function chooseEggPath(kind) {
-    if (kind === "special" || kind === "iris") {
+    if (kind === "special" || kind === "iris" || kind === "oni") {
       setBranch(kind);
       setRecords((r) => ({
         ...r,
@@ -6613,6 +6687,14 @@ function MathMonsterBattle() {
       perks: ["あとで 2つの みちに わかれる", "バランスの よい つよさ"],
       color: "#4A4580"
     },
+    {
+      key: "oni",
+      stageId: "mizuoni",
+      name: "みずのおに",
+      desc: ONI_BRANCH.desc,
+      perks: ONI_BRANCH.perks,
+      color: "#4A7FD9"
+    },
     ...irisUnlocked ? [
       {
         key: "iris",
@@ -6862,7 +6944,7 @@ function MathMonsterBattle() {
       "💰 ",
       item.cost
     ));
-  })), /* @__PURE__ */ React.createElement("div", { style: styles.statBox }, /* @__PURE__ */ React.createElement("div", { style: styles.statBoxTitle }, "いまの つよさ"), /* @__PURE__ */ React.createElement("div", { style: styles.statRow }, /* @__PURE__ */ React.createElement("span", null, "⚔️ こうげき ", atk), /* @__PURE__ */ React.createElement("span", null, "🛡️ ぼうぎょ ", def), /* @__PURE__ */ React.createElement("span", null, "❤️ さいだいHP ", maxHp)), /* @__PURE__ */ React.createElement("div", { style: styles.statRow }, /* @__PURE__ */ React.createElement("span", null, "💰 ばいりつ ×", Math.round(stats.pointMult * 100) / 100), /* @__PURE__ */ React.createElement("span", null, "🔥 れんぞく +", streakBonus)), branch && /* @__PURE__ */ React.createElement("div", { style: styles.statRow }, /* @__PURE__ */ React.createElement("span", null, (_h = BRANCHES.find((b) => b.id === branch)) == null ? void 0 : _h.emoji, " ", (_i = BRANCHES.find((b) => b.id === branch)) == null ? void 0 : _i.label), /* @__PURE__ */ React.createElement("span", null, "⏱ じかん ×", stats.timeMult)))), tab === "dex" && /* @__PURE__ */ React.createElement("div", { style: styles.dexScreen }, /* @__PURE__ */ React.createElement("div", { style: styles.shopHeader }, "ずかん"), /* @__PURE__ */ React.createElement("div", { style: styles.shopGroupLabel }, "🐣 なかま"), [...BRANCHES, IRIS_BRANCH, SPECIAL_BRANCH].map((b) => {
+  })), /* @__PURE__ */ React.createElement("div", { style: styles.statBox }, /* @__PURE__ */ React.createElement("div", { style: styles.statBoxTitle }, "いまの つよさ"), /* @__PURE__ */ React.createElement("div", { style: styles.statRow }, /* @__PURE__ */ React.createElement("span", null, "⚔️ こうげき ", atk), /* @__PURE__ */ React.createElement("span", null, "🛡️ ぼうぎょ ", def), /* @__PURE__ */ React.createElement("span", null, "❤️ さいだいHP ", maxHp)), /* @__PURE__ */ React.createElement("div", { style: styles.statRow }, /* @__PURE__ */ React.createElement("span", null, "💰 ばいりつ ×", Math.round(stats.pointMult * 100) / 100), /* @__PURE__ */ React.createElement("span", null, "🔥 れんぞく +", streakBonus)), branch && /* @__PURE__ */ React.createElement("div", { style: styles.statRow }, /* @__PURE__ */ React.createElement("span", null, (_h = BRANCHES.find((b) => b.id === branch)) == null ? void 0 : _h.emoji, " ", (_i = BRANCHES.find((b) => b.id === branch)) == null ? void 0 : _i.label), /* @__PURE__ */ React.createElement("span", null, "⏱ じかん ×", stats.timeMult)))), tab === "dex" && /* @__PURE__ */ React.createElement("div", { style: styles.dexScreen }, /* @__PURE__ */ React.createElement("div", { style: styles.shopHeader }, "ずかん"), /* @__PURE__ */ React.createElement("div", { style: styles.shopGroupLabel }, "🐣 なかま"), [...BRANCHES, ONI_BRANCH, IRIS_BRANCH, SPECIAL_BRANCH].map((b) => {
     const everSeenIris = BRANCH_PATHS.iris.some(
       (id) => (records.seenStages || []).includes(id)
     );
@@ -8106,17 +8188,15 @@ const styles = {
     fontWeight: 800
   },
   kanaSlots: {
-    display: "flex",
-    flexWrap: "wrap",
-    justifyContent: "center",
+    display: "grid",
+    gridTemplateColumns: "repeat(13, 1fr)",
     gap: 3
   },
   kanaSlot: {
-    width: 24,
-    height: 32,
-    lineHeight: "32px",
+    height: 34,
+    lineHeight: "34px",
     textAlign: "center",
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: 800,
     color: "#FFD23F",
     background: "#221F47",
@@ -8133,13 +8213,18 @@ const styles = {
     fontWeight: 700
   },
   kanaKeys: {
+    // 五十音表 と おなじ たてよみ・みぎから ひだり。
+    // みぎはしが あ行 で、ひだりへ か さ た な は ま と ならぶ
     display: "grid",
-    gridTemplateColumns: "repeat(8, 1fr)",
+    gridTemplateRows: "repeat(5, 1fr)",
+    gridAutoFlow: "column",
+    direction: "rtl",
     gap: 5
   },
   kanaKey: {
+    direction: "ltr",
     padding: "11px 0",
-    fontSize: 19,
+    fontSize: 22,
     fontWeight: 800,
     color: "#F5F3FF",
     background: "#2A2654",
